@@ -1,0 +1,60 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>BankRisk Compass</title>
+    <link rel="stylesheet" href="{% static 'app/styles.css' %}">
+</head>
+<body>
+    <div class="app-shell">
+        <aside class="sidebar">
+            <div class="compass-logo"><div class="compass-dot"></div></div>
+            <nav class="nav-stack" aria-label="Dashboard navigation">
+                {% for item in pages %}
+                    <a class="nav-link {% if item.key == active_page %}active{% endif %}" href="{% url item.url_name %}">
+                        <span class="nav-number">{{ item.number }}</span>
+                        <span>{{ item.label }}</span>
+                    </a>
+                {% endfor %}
+            </nav>
+            <div class="governance">
+                <strong>Model governed</strong><br>
+                <small>Version 1.0.3</small><span class="green-dot"></span>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="page-header">
+                <div>
+                    <div class="brand-row">
+                        <h1 class="brand-title">BankRisk Compass</h1>
+                        <span class="model-badge">Best model: {{ best_model }}</span>
+                    </div>
+                    <div class="brand-subtitle">Credit Default Risk Modeling</div>
+                </div>
+                <div class="header-actions">
+                    <div>{{ display_date }}</div>
+                    <div class="header-divider"></div>
+                    <div>Risk Analyst</div>
+                </div>
+            </header>
+
+            {% if error_message %}
+                <section class="panel">
+                    <div class="card-title"><span class="title-icon">ER</span>Dashboard Unavailable</div>
+                    <p class="empty-state">{{ error_message }}</p>
+                </section>
+            {% else %}
+                {% block content %}{% endblock %}
+            {% endif %}
+
+            <footer class="footer-row">
+                <div>Data, charts, thresholds, and reports are generated from this project's saved artifacts.</div>
+                <div>Dashboard date: {{ display_date }}</div>
+            </footer>
+        </main>
+    </div>
+</body>
+</html>

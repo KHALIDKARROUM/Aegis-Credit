@@ -1,0 +1,84 @@
+{% extends "app/base.html" %}
+
+{% block content %}
+<section class="panel threshold-control">
+    <div class="threshold-header">
+        <span>{{ current_threshold_label }}</span>
+        <strong>{{ business_threshold_label }}</strong>
+    </div>
+    <form method="get">
+        <label>
+            <span>Decision threshold</span>
+            <input name="threshold" type="range" min="0.10" max="0.90" step="0.01" value="{{ selected_threshold }}" oninput="this.nextElementSibling.value = Number(this.value).toFixed(2)">
+            <output>{{ selected_threshold }}</output>
+        </label>
+        <button class="secondary-button" type="submit">Apply Threshold</button>
+        <a class="text-button" href="{% url 'threshold' %}">Reset to recommended</a>
+    </form>
+</section>
+
+<section class="metric-grid">
+    {% for metric in threshold_summary %}
+        <article class="metric-tile">
+            <div class="metric-label">{{ metric.label }}</div>
+            <div class="metric-value">{{ metric.value }}</div>
+            <div class="metric-foot">{{ metric.foot }}</div>
+        </article>
+    {% endfor %}
+</section>
+
+<section class="dashboard-grid split-wide">
+    <article class="panel">
+        <div class="card-title"><span class="title-icon">TA</span>Threshold Tradeoff</div>
+        <img class="report-image" src="{% url 'report-artifact' 'threshold_tradeoff.png' %}" alt="Threshold tradeoff chart">
+    </article>
+
+    <article class="panel">
+        <div class="card-title"><span class="title-icon">CM</span>Confusion Matrix</div>
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>Predicted non-default</th>
+                        <th>Predicted default</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in confusion %}
+                        <tr>
+                            <th>{{ row.actual }}</th>
+                            <td>{{ row.predicted_non_default }}</td>
+                            <td>{{ row.predicted_default }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </article>
+</section>
+
+<section class="panel">
+    <div class="card-title"><span class="title-icon">TH</span>Threshold Analysis Table</div>
+    <div class="table-wrap tall">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    {% for column in threshold_table.columns %}
+                        <th>{{ column }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in threshold_table.rows %}
+                    <tr>
+                        {% for cell in row %}
+                            <td>{{ cell }}</td>
+                        {% endfor %}
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

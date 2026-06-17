@@ -1,0 +1,67 @@
+{% extends "app/base.html" %}
+
+{% block content %}
+<section class="dashboard-grid split">
+    <article class="panel">
+        <div class="card-title"><span class="title-icon">MC</span>Model Performance Comparison</div>
+        <div class="comparison-chart">
+            {% for row in model_comparison_bars %}
+                <div class="comparison-row">
+                    <div class="comparison-label">
+                        <strong>{{ row.model }}</strong>
+                        <span>{{ row.metric }}</span>
+                    </div>
+                    <div class="comparison-track">
+                        <div class="comparison-fill {{ row.color }}" style="width: {{ row.width }}"></div>
+                    </div>
+                    <div class="comparison-score">{{ row.score }}</div>
+                </div>
+            {% endfor %}
+        </div>
+    </article>
+
+    <article class="panel">
+        <div class="card-title"><span class="title-icon">DR</span>Top Credit Risk Drivers</div>
+        <div class="bar-list importance-list">
+            {% for row in importance_bars %}
+                <div class="bar-row">
+                    <span>{{ row.label }}</span>
+                    <div class="bar-track"><div class="bar-fill navy" style="width: {{ row.width }}"></div></div>
+                    <strong>{{ row.value }}</strong>
+                </div>
+            {% empty %}
+                <p class="empty-state">Run training to generate permutation importance.</p>
+            {% endfor %}
+        </div>
+    </article>
+</section>
+
+<section class="panel">
+    <div class="card-title"><span class="title-icon">MT</span>Model Metrics Table</div>
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    {% for column in model_comparison_table.columns %}
+                        <th>{{ column }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in model_comparison_table.rows %}
+                    <tr>
+                        {% for cell in row %}
+                            <td>{{ cell }}</td>
+                        {% endfor %}
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="note-panel">
+    <strong>Leakage note:</strong>
+    Loan grade and interest rate may contain lender-assigned risk information. A second model without these variables can be tested to reduce leakage risk.
+</section>
+{% endblock %}

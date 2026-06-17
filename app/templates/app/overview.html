@@ -1,0 +1,99 @@
+{% extends "app/base.html" %}
+
+{% block content %}
+<section class="metric-grid">
+    {% for metric in metric_tiles %}
+        <article class="metric-tile">
+            <div class="metric-label">{{ metric.label }}</div>
+            <div class="metric-value">{{ metric.value }}</div>
+            <div class="metric-foot">{{ metric.foot }}</div>
+        </article>
+    {% endfor %}
+</section>
+
+<section class="dashboard-grid three-col">
+    <article class="panel">
+        <div class="card-title"><span class="title-icon">DG</span>Default Rate by Grade</div>
+        <div class="bar-list">
+            {% for row in grade_bars %}
+                <div class="bar-row">
+                    <span title="{{ row.full_label }}">{{ row.label }}</span>
+                    <div class="bar-track"><div class="bar-fill blue" style="width: {{ row.width }}"></div></div>
+                    <strong>{{ row.value }} | {{ row.count }}</strong>
+                </div>
+            {% endfor %}
+        </div>
+    </article>
+
+    <article class="panel">
+        <div class="card-title"><span class="title-icon">DI</span>Default Rate by Intent</div>
+        <div class="bar-list">
+            {% for row in intent_bars %}
+                <div class="bar-row">
+                    <span title="{{ row.full_label }}">{{ row.label }}</span>
+                    <div class="bar-track"><div class="bar-fill green" style="width: {{ row.width }}"></div></div>
+                    <strong>{{ row.value }} | {{ row.count }}</strong>
+                </div>
+            {% endfor %}
+        </div>
+    </article>
+
+    <article class="panel">
+        <div class="card-title"><span class="title-icon">MP</span>Model Performance</div>
+        <table class="perf-table">
+            <thead><tr><th colspan="2">Default threshold (0.50)</th></tr></thead>
+            <tbody>
+                {% for row in default_metrics_pairs %}
+                    <tr><td>{{ row.label }}</td><td>{{ row.value }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <table class="perf-table business">
+            <thead><tr><th colspan="2">Business threshold ({{ business_threshold }})</th></tr></thead>
+            <tbody>
+                {% for row in business_metrics_pairs %}
+                    <tr><td>{{ row.label }}</td><td>{{ row.value }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </article>
+</section>
+
+<section class="dashboard-grid split-wide">
+    <article class="panel">
+        <div class="card-title"><span class="title-icon">MC</span>Model Performance Comparison</div>
+        <div class="comparison-chart">
+            {% for row in model_comparison_bars %}
+                <div class="comparison-row">
+                    <div class="comparison-label">
+                        <strong>{{ row.model }}</strong>
+                        <span>{{ row.metric }}</span>
+                    </div>
+                    <div class="comparison-track">
+                        <div class="comparison-fill {{ row.color }}" style="width: {{ row.width }}"></div>
+                    </div>
+                    <div class="comparison-score">{{ row.score }}</div>
+                </div>
+            {% endfor %}
+        </div>
+    </article>
+
+    <article class="insight-card">
+        <div>
+            <div class="insight-bulb">BI</div>
+            <div class="insight-title">Business Insight</div>
+            <div class="insight-rule"></div>
+            <p>
+                The portfolio default rate is <strong>{{ portfolio_default_rate }}</strong>.
+                The strongest global driver in the saved permutation analysis is
+                <strong>{{ top_feature }}</strong>, so underwriting should monitor this factor closely.
+            </p>
+        </div>
+    </article>
+</section>
+
+<section class="note-panel">
+    <strong>Leakage note:</strong>
+    Loan grade and interest rate may contain lender-assigned risk information. A second model without these variables can be tested to reduce leakage risk.
+</section>
+{% endblock %}

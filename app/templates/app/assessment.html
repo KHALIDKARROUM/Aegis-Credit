@@ -1,0 +1,128 @@
+{% extends "app/base.html" %}
+
+{% block content %}
+<section class="assessment-grid">
+    <article class="panel">
+        <div class="card-title"><span class="title-icon">AP</span>Applicant Profile</div>
+        <form class="assessment-form" method="post">
+            {% csrf_token %}
+            <div class="form-grid">
+                <label>
+                    <span>Age</span>
+                    <input name="person_age" type="number" min="18" max="100" step="1" value="{{ form.person_age }}">
+                </label>
+                <label>
+                    <span>Annual Income</span>
+                    <input name="person_income" type="number" min="0" max="2000000" step="1000" value="{{ form.person_income }}">
+                </label>
+                <label>
+                    <span>Employment Length</span>
+                    <input name="person_emp_length" type="number" min="0" max="60" step="0.5" value="{{ form.person_emp_length }}">
+                </label>
+                <label>
+                    <span>Home Ownership</span>
+                    <select name="person_home_ownership">
+                        {% for option in options.person_home_ownership %}
+                            <option value="{{ option }}" {% if option == form.person_home_ownership %}selected{% endif %}>{{ option }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    <span>Loan Amount</span>
+                    <input name="loan_amnt" type="number" min="500" max="500000" step="500" value="{{ form.loan_amnt }}">
+                </label>
+                <label>
+                    <span>Interest Rate</span>
+                    <input name="loan_int_rate" type="number" min="0" max="40" step="0.25" value="{{ form.loan_int_rate }}">
+                </label>
+                <label>
+                    <span>Loan Intent</span>
+                    <select name="loan_intent">
+                        {% for option in options.loan_intent %}
+                            <option value="{{ option }}" {% if option == form.loan_intent %}selected{% endif %}>{{ option }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    <span>Loan Grade</span>
+                    <select name="loan_grade">
+                        {% for option in options.loan_grade %}
+                            <option value="{{ option }}" {% if option == form.loan_grade %}selected{% endif %}>{{ option }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    <span>Credit History Length</span>
+                    <input name="cb_person_cred_hist_length" type="number" min="0" max="50" step="1" value="{{ form.cb_person_cred_hist_length }}">
+                </label>
+                <label>
+                    <span>Prior Default on File</span>
+                    <select name="cb_person_default_on_file">
+                        {% for option in options.cb_person_default_on_file %}
+                            <option value="{{ option }}" {% if option == form.cb_person_default_on_file %}selected{% endif %}>{{ option }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+            </div>
+            <button class="primary-button" type="submit">Predict Risk</button>
+        </form>
+    </article>
+
+    <article class="panel">
+        <div class="card-title"><span class="title-icon">RP</span>Risk Prediction</div>
+        <div class="risk-main">
+            <div class="gauge" style="{{ gauge_style }}">
+                <div class="gauge-inner">
+                    <div>
+                        <div class="gauge-label">Default Risk<br>Probability</div>
+                        <div class="gauge-value" style="color: {{ category_color }}">{{ probability_percent }}</div>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <div class="prediction-label">Risk Level:</div>
+                <div class="risk-pill {{ category_class }}">{{ category }}</div>
+                <div class="prediction-label">Model Prediction:</div>
+                <div class="prediction-value {{ category_class }}">{{ prediction }}</div>
+                <div class="divider"></div>
+                <div class="prediction-label">Recommended Action:</div>
+                <div class="prediction-value {{ category_class }}">{{ decision }}</div>
+            </div>
+        </div>
+        <div class="threshold-box">
+            Business threshold = <strong>{{ threshold|floatformat:2 }}</strong><br>
+            This threshold comes from the saved threshold analysis using a 5:1 false-negative to false-positive cost ratio.
+        </div>
+        <p class="decision-note">This model supports the decision; it does not replace final credit approval.</p>
+    </article>
+</section>
+
+<section class="panel">
+    <div class="card-title"><span class="title-icon">EX</span>Why This Applicant Received This Prediction</div>
+    <div class="explanation-grid">
+        {% for row in explanation_rows %}
+            <article class="explanation-item {{ row.class }}">
+                <div>
+                    <strong>{{ row.factor }}</strong>
+                    <p>{{ row.detail }}</p>
+                </div>
+                <span>{{ row.impact }}</span>
+            </article>
+        {% endfor %}
+    </div>
+</section>
+
+<section class="panel">
+    <div class="card-title"><span class="title-icon">BL</span>Applicant Blotter</div>
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead><tr><th>Feature</th><th>Applicant Value</th></tr></thead>
+            <tbody>
+                {% for row in snapshot %}
+                    <tr><td>{{ row.feature }}</td><td>{{ row.value }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
