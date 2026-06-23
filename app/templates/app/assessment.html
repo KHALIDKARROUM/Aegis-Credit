@@ -99,6 +99,7 @@
 
 <section class="panel">
     <div class="card-title"><span class="title-icon">EX</span>Why This Applicant Received This Prediction</div>
+    <p class="explanation-method">{{ explanation_method }}</p>
     <div class="explanation-grid">
         {% for row in explanation_rows %}
             <article class="explanation-item {{ row.class }}">

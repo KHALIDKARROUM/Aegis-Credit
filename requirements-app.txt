@@ -1,11 +1,10 @@
+# Packages required to run the dashboard.
+# Notebook, training, and deployment-only tools remain in requirements.txt.
 pandas==2.3.3
 numpy==2.3.5
 scikit-learn==1.7.2
 matplotlib==3.10.6
-seaborn==0.13.2
 Django==6.0.6
 joblib==1.5.2
 shap==0.49.1
-jupyter==1.1.1
 whitenoise[brotli]==6.12.0
-gunicorn==23.0.0

@@ -3,17 +3,20 @@ from __future__ import annotations
 import html
 import io
 import csv
+import logging
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import joblib
+import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.figure import Figure
 
 
+LOGGER = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_PATH = PROJECT_ROOT / "data" / "credit_risk.csv"
 MODEL_PATH = PROJECT_ROOT / "models" / "credit_risk_model.pkl"
@@ -513,6 +516,12 @@ def assessment_result(bundle: dict[str, Any], payload: Any | None) -> dict[str, 
             display_value = str(value)
         snapshot.append({"feature": pretty_feature_name(feature), "value": display_value})
 
+    explanation_rows, explanation_method = applicant_explanations(
+        bundle,
+        application,
+        form,
+    )
+
     return {
         "form": form,
         "application": application,
@@ -526,11 +535,123 @@ def assessment_result(bundle: dict[str, Any], payload: Any | None) -> dict[str, 
         "decision": decision,
         "threshold": threshold,
         "snapshot": snapshot,
-        "explanation_rows": applicant_explanations(form),
+        "explanation_rows": explanation_rows,
+        "explanation_method": explanation_method,
     }
 
 
-def applicant_explanations(form: dict[str, Any]) -> list[dict[str, str]]:
+@lru_cache(maxsize=2)
+def _tree_explainer(classifier: Any) -> Any:
+    import shap
+
+    return shap.TreeExplainer(
+        classifier,
+        feature_perturbation="tree_path_dependent",
+        model_output="raw",
+    )
+
+
+def _source_feature(transformed_name: str, features: list[str]) -> str:
+    feature_name = transformed_name.split("__", maxsplit=1)[-1]
+    for source in sorted(features, key=len, reverse=True):
+        if feature_name == source or feature_name.startswith(f"{source}_"):
+            return source
+    return feature_name
+
+
+def _default_class_shap_values(values: Any) -> np.ndarray:
+    if isinstance(values, list):
+        return np.asarray(values[1])[0]
+
+    array = np.asarray(values)
+    if array.ndim == 3:
+        return array[0, :, 1]
+    if array.ndim == 2:
+        return array[0]
+    if array.ndim == 1:
+        return array
+    raise ValueError(f"Unsupported SHAP output shape: {array.shape}")
+
+
+def _feature_value_text(feature: str, value: Any) -> str:
+    if feature == "loan_percent_income":
+        return format_percent(float(value))
+    if feature in {"person_income", "loan_amnt"}:
+        return format_money(float(value))
+    if feature == "loan_int_rate":
+        return f"{float(value):.2f}%"
+    if feature in {"person_emp_length", "cb_person_cred_hist_length"}:
+        return f"{float(value):g} years"
+    if feature == "person_age":
+        return f"{int(value)} years"
+    return str(value).replace("_", " ").title()
+
+
+def shap_applicant_explanations(
+    bundle: dict[str, Any],
+    application: pd.DataFrame,
+) -> list[dict[str, str]]:
+    pipeline = bundle["pipeline"]
+    preprocessor = pipeline.named_steps["preprocessor"]
+    classifier = pipeline.named_steps["classifier"]
+    transformed = preprocessor.transform(application)
+    transformed_names = preprocessor.get_feature_names_out()
+    values = _default_class_shap_values(
+        _tree_explainer(classifier).shap_values(transformed)
+    )
+
+    contributions = {feature: 0.0 for feature in bundle["features"]}
+    for transformed_name, contribution in zip(transformed_names, values):
+        source = _source_feature(str(transformed_name), bundle["features"])
+        contributions[source] = contributions.get(source, 0.0) + float(contribution)
+
+    applicant = application.iloc[0].to_dict()
+    ranked = sorted(
+        contributions.items(),
+        key=lambda item: abs(item[1]),
+        reverse=True,
+    )[:5]
+
+    rows = []
+    for feature, contribution in ranked:
+        raises_risk = contribution > 0
+        direction = "toward default" if raises_risk else "toward non-default"
+        rows.append(
+            {
+                "factor": pretty_feature_name(feature),
+                "detail": (
+                    f"Applicant value: {_feature_value_text(feature, applicant[feature])}. "
+                    f"SHAP impact {contribution:+.3f}, moving the model {direction}."
+                ),
+                "impact": "Raises model risk" if raises_risk else "Lowers model risk",
+                "class": "negative" if raises_risk else "positive",
+            }
+        )
+    return rows
+
+
+def applicant_explanations(
+    bundle: dict[str, Any],
+    application: pd.DataFrame,
+    form: dict[str, Any],
+) -> tuple[list[dict[str, str]], str]:
+    try:
+        rows = shap_applicant_explanations(bundle, application)
+        if rows:
+            return (
+                rows,
+                "Tree SHAP ranks the five applicant fields with the largest local impact on this prediction.",
+            )
+    except Exception as exc:
+        LOGGER.exception("Falling back to policy-based applicant explanations: %s", exc)
+
+    return (
+        policy_applicant_explanations(form),
+        "Model explanation is temporarily unavailable; these fallback indicators use transparent lending-risk rules.",
+    )
+
+
+def policy_applicant_explanations(form: dict[str, Any]) -> list[dict[str, str]]:
     loan_percent_income = float(form["loan_percent_income"])
     loan_grade = str(form["loan_grade"])
     prior_default = str(form["cb_person_default_on_file"])

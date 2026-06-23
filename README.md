@@ -119,6 +119,23 @@ python manage.py runserver
 
 ## How to Run
 
+### One-click Windows launch
+
+For non-technical Windows users:
+
+1. Install Python 3.13 and select **Add Python to PATH** during installation.
+2. Download or copy the complete project folder.
+3. Double-click `Start BankRisk Compass.bat`.
+
+The launcher creates a private Python environment, installs the required packages,
+opens the dashboard in the default browser, and starts the local server. The first
+launch takes longer because dependencies are installed. Keep the launcher window
+open while using the application; close it or press `Ctrl+C` to stop the app.
+It uses the smaller `requirements-app.txt` runtime dependency list; notebook,
+training, and deployment tools are not installed for end users.
+
+### Developer launch
+
 Install dependencies with the Python already available on your machine:
 
 ```bash

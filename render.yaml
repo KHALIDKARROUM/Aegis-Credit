@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: bankrisk-compass
+    runtime: python
+    plan: free
+    buildCommand: bash build.sh
+    startCommand: gunicorn bankrisk_compass.wsgi:application
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.9
+      - key: DEBUG
+        value: "False"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: SECURE_SSL_REDIRECT
+        value: "True"
