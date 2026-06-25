@@ -6,3 +6,6 @@ __pycache__/
 venv/
 db.sqlite3
 staticfiles/
+.coverage
+htmlcov/
+.env

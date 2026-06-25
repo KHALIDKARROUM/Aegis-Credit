@@ -2,42 +2,55 @@
 
 ## Final Model
 
-The final model is a leakage-safe Random Forest classifier wrapped in a scikit-learn Pipeline. Missing values, scaling, and one-hot encoding are fitted only on the training data through a ColumnTransformer.
+The final model is a calibrated, leakage-safe Random Forest classifier. Missing values, scaling, and one-hot encoding are fitted only on training data. Probability calibration and the business threshold are selected on a separate validation set; the final metrics below are measured once on an untouched test set.
+
+Application-time scoring intentionally excludes lender-assigned fields (`loan_grade` and `loan_int_rate`) to avoid using information that may not exist when an applicant is first assessed.
+Age is also excluded from the probability model; it is retained only for input plausibility checks and subgroup monitoring.
+
+Data split:
+
+- Training: 19,449 rows
+- Validation/calibration: 6,483 rows
+- Final test: 6,484 rows
 
 Best hyperparameters:
 
 ```text
-{'classifier__max_depth': None, 'classifier__min_samples_leaf': 1, 'classifier__n_estimators': 200}
+{'classifier__max_depth': 16, 'classifier__min_samples_leaf': 2, 'classifier__n_estimators': 200}
 ```
 
 ## Default 0.50 Threshold Results
 
 | Metric | Score |
 |---|---:|
-| Accuracy | 0.934 |
-| Precision | 0.974 |
-| Recall | 0.715 |
-| F1-score | 0.825 |
-| ROC-AUC | 0.931 |
+| Accuracy | 0.880 |
+| Precision | 0.847 |
+| Recall | 0.551 |
+| F1-score | 0.668 |
+| ROC-AUC | 0.870 |
+| Average precision | 0.775 |
+| Brier score | 0.093 |
 
 ## Business Threshold Results
 
-The selected business threshold is **0.26**. It assumes a false negative is 5x more costly than a false positive:
+The selected business threshold is **0.19**. It assumes a false negative is 5x more costly than a false positive:
 
 - False negative: a risky borrower is approved.
 - False positive: a safer borrower is rejected or sent to manual review.
 
 | Metric | Score |
 |---|---:|
-| Accuracy | 0.913 |
-| Precision | 0.810 |
-| Recall | 0.784 |
-| F1-score | 0.797 |
-| ROC-AUC | 0.931 |
-| False positives | 260 |
-| False negatives | 306 |
-| Business cost | 1790 |
+| Accuracy | 0.824 |
+| Precision | 0.579 |
+| Recall | 0.724 |
+| F1-score | 0.643 |
+| ROC-AUC | 0.870 |
+| Average precision | 0.775 |
+| Brier score | 0.093 |
+| False positives | 748 |
+| False negatives | 391 |
+| Business cost | 2703 |
 
 ## Interpretation
 
-The model performs strongly at ranking applicants by default risk, but bank decisions should not use accuracy alone. In credit risk, the cost of approving a borrower who defaults is usually higher than the cost of sending a borderline safe borrower to manual review. The business threshold therefore prioritizes recall for defaults while still monitoring precision to avoid rejecting too many viable customers.
+The model is a decision-support tool, not an autonomous approval system. The business threshold prioritizes recall for defaults while monitoring the number of safer applicants routed to review. Age-group diagnostics and calibration reports are generated for governance review, but they do not replace a complete fair-lending assessment using legally appropriate protected-class data.

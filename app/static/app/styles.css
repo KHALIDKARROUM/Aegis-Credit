@@ -14,7 +14,9 @@
     --red-soft: #fde2e5;
     --amber: #f0a500;
     --amber-soft: #fff3cf;
-    --shadow: 0 12px 28px rgba(18, 42, 82, 0.10);
+    --shadow: 0 12px 30px rgba(18, 42, 82, 0.08);
+    --shadow-hover: 0 18px 40px rgba(18, 42, 82, 0.13);
+    --radius: 14px;
 }
 
 * {
@@ -26,7 +28,8 @@ body {
     min-height: 100vh;
     background: var(--bg);
     color: var(--text);
-    font-family: Arial, Helvetica, sans-serif;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    line-height: 1.45;
 }
 
 button,
@@ -35,9 +38,33 @@ select {
     font: inherit;
 }
 
+.skip-link {
+    position: fixed;
+    left: 1rem;
+    top: -5rem;
+    z-index: 100;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    background: #ffffff;
+    color: var(--navy);
+    font-weight: 850;
+}
+
+.skip-link:focus {
+    top: 1rem;
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+    outline: 3px solid rgba(11, 99, 206, 0.35);
+    outline-offset: 2px;
+}
+
 .app-shell {
     display: grid;
-    grid-template-columns: 230px minmax(0, 1fr);
+    grid-template-columns: 248px minmax(0, 1fr);
     min-height: 100vh;
 }
 
@@ -45,17 +72,29 @@ select {
     position: sticky;
     top: 0;
     height: 100vh;
-    padding: 1.2rem 0.85rem;
-    background: linear-gradient(180deg, var(--navy), var(--navy-dark));
+    padding: 1.25rem 1rem;
+    background:
+        radial-gradient(circle at 50% 0%, rgba(61, 133, 236, 0.30), transparent 32%),
+        linear-gradient(180deg, var(--navy), var(--navy-dark));
     color: #ffffff;
 }
 
+.sidebar-brand {
+    display: grid;
+    place-items: center;
+    gap: 0.55rem;
+    margin-bottom: 1.5rem;
+    font-size: 1rem;
+    font-weight: 900;
+    letter-spacing: 0.02em;
+}
+
 .compass-logo {
-    width: 88px;
-    height: 88px;
+    width: 76px;
+    height: 76px;
     border: 2px solid rgba(255, 255, 255, 0.72);
     border-radius: 50%;
-    margin: 0.25rem auto 1.55rem auto;
+    margin: 0 auto;
     position: relative;
 }
 
@@ -64,9 +103,9 @@ select {
     content: "";
     position: absolute;
     left: 50%;
-    top: 10px;
+    top: 9px;
     width: 2px;
-    height: 68px;
+    height: 55px;
     background: rgba(255, 255, 255, 0.88);
     transform: translateX(-50%);
 }
@@ -101,7 +140,7 @@ select {
     gap: 0.72rem;
     padding: 0 0.9rem;
     border: 1px solid rgba(255, 255, 255, 0.20);
-    border-radius: 8px;
+    border-radius: 10px;
     color: #ffffff;
     background: rgba(255, 255, 255, 0.04);
     text-decoration: none;
@@ -133,7 +172,9 @@ select {
     width: 190px;
     color: rgba(255, 255, 255, 0.88);
     font-size: 0.78rem;
-    line-height: 1.35;
+    line-height: 1.5;
+    display: grid;
+    gap: 0.2rem;
 }
 
 .governance small {
@@ -149,9 +190,19 @@ select {
     background: #31dc98;
 }
 
+.status-line {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-weight: 800;
+}
+
 .main-content {
     min-width: 0;
-    padding: 1.25rem 1.55rem 1.2rem 1.55rem;
+    width: 100%;
+    max-width: 1660px;
+    margin: 0 auto;
+    padding: 1.5rem 1.75rem 1.25rem;
 }
 
 .page-header {
@@ -172,7 +223,7 @@ select {
 .brand-title {
     margin: 0;
     color: var(--text);
-    font-size: 2.35rem;
+    font-size: clamp(2rem, 3vw, 2.65rem);
     line-height: 1;
     font-weight: 950;
     letter-spacing: 0;
@@ -192,7 +243,8 @@ select {
     border: 1px solid #16a68b;
     background: #f2fffb;
     color: var(--green);
-    border-radius: 8px;
+    gap: 0.45rem;
+    border-radius: 999px;
     font-weight: 850;
 }
 
@@ -223,13 +275,22 @@ select {
 .panel {
     background: var(--panel);
     border: 1px solid var(--line);
-    border-radius: 8px;
+    border-radius: var(--radius);
     box-shadow: var(--shadow);
 }
 
 .metric-tile {
     min-height: 118px;
     padding: 1rem;
+}
+
+.metric-tile {
+    transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.metric-tile:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-hover);
 }
 
 .metric-label {
@@ -279,7 +340,7 @@ select {
 }
 
 .panel {
-    padding: 1rem;
+    padding: 1.15rem;
 }
 
 .card-title {
@@ -311,7 +372,7 @@ select {
 
 .bar-row {
     display: grid;
-    grid-template-columns: minmax(92px, 0.65fr) minmax(120px, 1fr) minmax(188px, 0.95fr);
+    grid-template-columns: minmax(92px, 0.62fr) minmax(100px, 1fr) minmax(152px, 0.9fr);
     gap: 0.75rem;
     align-items: center;
     color: var(--text);
@@ -321,6 +382,8 @@ select {
 .bar-row strong {
     text-align: right;
     font-size: 0.84rem;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .bar-track {
@@ -543,19 +606,92 @@ label {
 input,
 select {
     width: 100%;
-    min-height: 40px;
-    padding: 0.5rem 0.65rem;
+    min-height: 46px;
+    padding: 0.65rem 0.75rem;
     background: #fbfdff;
     border: 1px solid #ccd8e8;
-    border-radius: 6px;
+    border-radius: 9px;
     color: var(--text);
+}
+
+input:hover,
+select:hover {
+    border-color: #9eb5d3;
+}
+
+input:focus,
+select:focus {
+    border-color: var(--blue);
+    background: #ffffff;
+    box-shadow: 0 0 0 4px rgba(11, 99, 206, 0.09);
+}
+
+.field-group {
+    display: grid;
+    align-content: start;
+    gap: 0.38rem;
+}
+
+.field-group > label {
+    font-size: 0.82rem;
+}
+
+.field-hint {
+    min-height: 1rem;
+    color: var(--muted);
+    font-size: 0.74rem;
+    font-weight: 600;
+}
+
+.field-error {
+    color: #b90e1b;
+    font-size: 0.78rem;
+    font-weight: 750;
+}
+
+.field-group.has-error input,
+.field-group.has-error select {
+    border-color: var(--red);
+    background: #fff9fa;
+}
+
+.section-copy {
+    margin: -0.25rem 0 1rem;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.form-alert {
+    padding: 0.85rem 1rem;
+    border: 1px solid;
+    border-radius: 10px;
+    font-size: 0.88rem;
+}
+
+.form-alert ul,
+.form-alert .errorlist {
+    margin: 0.45rem 0 0;
+    padding-left: 1.25rem;
+}
+
+.error-alert {
+    border-color: #f2b8bd;
+    background: var(--red-soft);
+    color: #8f101a;
+}
+
+.warning-alert {
+    margin-top: 1rem;
+    border-color: #efd48b;
+    background: var(--amber-soft);
+    color: #704a00;
 }
 
 .primary-button,
 .secondary-button {
     min-height: 46px;
     border: 0;
-    border-radius: 6px;
+    border-radius: 9px;
     color: #ffffff;
     font-size: 1rem;
     font-weight: 850;
@@ -566,6 +702,28 @@ select {
     width: 100%;
     background: linear-gradient(180deg, #1374ee, #0456c8);
     box-shadow: 0 10px 18px rgba(11, 99, 206, 0.24);
+}
+
+.primary-button:hover {
+    filter: brightness(1.04);
+    transform: translateY(-1px);
+}
+
+.primary-button:disabled {
+    cursor: wait;
+    opacity: 0.82;
+}
+
+.button-loading {
+    display: none;
+}
+
+.primary-button.is-loading .button-label {
+    display: none;
+}
+
+.primary-button.is-loading .button-loading {
+    display: inline;
 }
 
 .secondary-button {
@@ -588,6 +746,14 @@ select {
     align-items: center;
     gap: 1rem;
     padding-top: 0.25rem;
+}
+
+.result-panel {
+    min-height: 100%;
+}
+
+.prediction-summary {
+    min-width: 0;
 }
 
 .gauge {
@@ -666,6 +832,11 @@ select {
     margin-bottom: 0.8rem;
 }
 
+.action-value {
+    font-size: 1.12rem;
+    line-height: 1.35;
+}
+
 .prediction-value.low {
     color: var(--green);
 }
@@ -704,8 +875,105 @@ select {
 
 .explanation-grid {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
     gap: 0.8rem;
+}
+
+.page-intro {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 1rem;
+    margin: 0 0 1rem;
+    padding: 1.1rem 1.2rem;
+    border: 1px solid #cfe0f5;
+    border-radius: var(--radius);
+    background:
+        linear-gradient(110deg, rgba(234, 242, 255, 0.95), rgba(242, 255, 251, 0.95));
+}
+
+.page-intro h2 {
+    margin: 0.2rem 0 0.3rem;
+    font-size: clamp(1.35rem, 2vw, 1.8rem);
+}
+
+.page-intro p {
+    max-width: 800px;
+    margin: 0;
+    color: var(--muted);
+}
+
+.eyebrow {
+    color: var(--blue);
+    font-size: 0.76rem;
+    font-weight: 900;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+.policy-chip {
+    flex: 0 0 auto;
+    padding: 0.55rem 0.8rem;
+    border: 1px solid #8dd4c4;
+    border-radius: 999px;
+    background: #ffffff;
+    color: var(--green);
+    font-size: 0.82rem;
+    font-weight: 850;
+}
+
+.empty-result {
+    min-height: 430px;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    padding: 2rem;
+    text-align: center;
+}
+
+.empty-result-icon {
+    width: 74px;
+    height: 74px;
+    display: grid;
+    place-items: center;
+    margin-bottom: 1rem;
+    border-radius: 24px;
+    background: linear-gradient(145deg, #eaf2ff, #e4f5ef);
+    color: var(--blue);
+    font-size: 2rem;
+    font-weight: 900;
+}
+
+.empty-result h3 {
+    margin: 0;
+    font-size: 1.35rem;
+}
+
+.empty-result p {
+    max-width: 440px;
+    margin: 0.6rem 0 1.2rem;
+    color: var(--muted);
+}
+
+.empty-result-steps {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.65rem;
+}
+
+.empty-result-steps span {
+    padding: 0.45rem 0.65rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: #ffffff;
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 750;
+}
+
+.empty-result-steps strong {
+    color: var(--blue);
 }
 
 .explanation-method {
@@ -935,9 +1203,10 @@ output {
     .sidebar {
         position: relative;
         height: auto;
+        padding: 0.8rem;
     }
 
-    .compass-logo,
+    .sidebar-brand,
     .governance {
         display: none;
     }
@@ -961,6 +1230,10 @@ output {
     .footer-row,
     .threshold-header {
         display: block;
+    }
+
+    .page-intro {
+        align-items: flex-start;
     }
 }
 
@@ -991,5 +1264,37 @@ output {
 
     .comparison-score {
         text-align: left;
+    }
+
+    .page-intro {
+        display: grid;
+    }
+
+    .header-actions {
+        margin-top: 0.8rem;
+        color: var(--muted);
+        font-size: 0.85rem;
+    }
+
+    .header-divider {
+        display: none;
+    }
+
+    .nav-stack {
+        grid-template-columns: repeat(5, minmax(130px, 1fr));
+    }
+
+    .empty-result {
+        min-height: 320px;
+        padding: 1rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        scroll-behavior: auto !important;
+        transition: none !important;
     }
 }

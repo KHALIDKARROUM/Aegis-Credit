@@ -104,6 +104,33 @@
     </div>
 </section>
 
+<section class="dashboard-grid split">
+    <article class="panel">
+        <div class="card-title"><span class="title-icon">CA</span>Probability Calibration</div>
+        <img class="report-image" src="{% url 'report-artifact' 'calibration_curve.png' %}" alt="Predicted probability compared with observed default rate">
+        <p class="section-copy">Points closer to the diagonal indicate that displayed probabilities better match observed default rates.</p>
+    </article>
+
+    <article class="panel">
+        <div class="card-title"><span class="title-icon">FG</span>Age-group Monitoring</div>
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        {% for column in fairness_table.columns %}<th>{{ column }}</th>{% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in fairness_table.rows %}
+                        <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p class="section-copy">Diagnostic only; small groups and unavailable protected-class attributes limit conclusions.</p>
+    </article>
+</section>
+
 <section class="panel">
     <div class="card-title"><span class="title-icon">AR</span>Project Artifacts</div>
     <div class="table-wrap">

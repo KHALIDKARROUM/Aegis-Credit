@@ -1,6 +1,6 @@
 # BankRisk Compass
 
-BankRisk Compass is an end-to-end credit default risk project. It trains a machine learning model to estimate whether a loan applicant is likely to default, then packages the result into a Django dashboard for applicant-level risk scoring, model explanation, and business threshold analysis.
+BankRisk Compass is an end-to-end credit default risk decision-support project. It trains and calibrates a machine learning model, evaluates it on an untouched test set, and packages it in a Django dashboard with validated applicant scoring, local explanations, threshold analysis, calibration diagnostics, and governance metadata.
 
 ## Business Problem
 
@@ -29,10 +29,14 @@ BankRisk-Compass/
 ├── app/
 │   ├── static/
 │   │   └── app/
+│   │       ├── app.js
 │   │       └── styles.css
 │   ├── templates/
 │   │   └── app/
+│   ├── forms.py
+│   ├── models.py
 │   ├── services.py
+│   ├── tests.py
 │   ├── urls.py
 │   └── views.py
 ├── bankrisk_compass/
@@ -42,7 +46,8 @@ BankRisk-Compass/
 │   └── credit_risk.csv
 ├── manage.py
 ├── models/
-│   └── credit_risk_model.pkl
+│   ├── credit_risk_model.pkl
+│   └── model_manifest.json
 ├── notebooks/
 │   └── bank.ipynb
 ├── reports/
@@ -58,9 +63,14 @@ BankRisk-Compass/
 │   └── threshold_tradeoff.png
 ├── src/
 │   ├── __init__.py
+│   ├── model_reporting.py
+│   ├── monitor_model.py
 │   └── train_model.py
+├── DATA_CARD.md
+├── MODEL_CARD.md
 ├── README.md
-└── requirements.txt
+├── requirements.txt
+└── requirements-prod.txt
 ```
 
 ## Workflow
@@ -69,11 +79,13 @@ BankRisk-Compass/
 2. Check missing values, class balance, and data quality issues.
 3. Explore default patterns by income, loan amount, interest rate, grade, and loan intent.
 4. Train models using a leakage-safe `Pipeline` and `ColumnTransformer`.
-5. Compare Logistic Regression, Random Forest, and Gradient Boosting.
-6. Tune the Random Forest model.
-7. Tune a decision threshold using a 5:1 false-negative to false-positive cost ratio.
-8. Save the model bundle with `joblib`.
-9. Generate reports, charts, permutation importance, and a Django dashboard.
+5. Split data into training, validation/calibration, and final test sets.
+6. Compare Logistic Regression, Random Forest, and Gradient Boosting on validation data.
+7. Tune and calibrate the Random Forest model.
+8. Select a decision threshold on validation data using a 5:1 false-negative to false-positive cost ratio.
+9. Evaluate once on the untouched final test set.
+10. Save a versioned model bundle and integrity manifest.
+11. Generate reports, calibration, subgroup diagnostics, explanations, and the Django dashboard.
 
 ## Leakage Prevention
 
@@ -87,15 +99,13 @@ Because preprocessing is fitted inside the pipeline, transformations are learned
 
 ## Model Results
 
-The final model is a tuned Random Forest.
+The final model is a calibrated Random Forest using application-time features. Loan grade and interest rate are excluded because they may be lender-assigned after underwriting begins. Age is used for input consistency checks and monitoring, but is excluded from the score itself.
 
 | Model | Accuracy | Precision | Recall | F1-score | ROC-AUC |
 |---|---:|---:|---:|---:|---:|
-| Random Forest | 0.934 | 0.974 | 0.715 | 0.825 | 0.931 |
-| Gradient Boosting | 0.929 | 0.951 | 0.710 | 0.813 | 0.925 |
-| Logistic Regression | 0.815 | 0.555 | 0.771 | 0.645 | 0.870 |
+| Random Forest | 0.880 | 0.847 | 0.551 | 0.668 | 0.870 |
 
-At the default `0.50` threshold, the Random Forest achieves about 93% accuracy and a 0.825 F1-score. The business threshold is `0.26`, which increases default recall from 0.715 to 0.784 by sending more borderline applicants to review.
+At the default `0.50` threshold, the final-test accuracy is 0.880 and ROC-AUC is 0.870. The validation-selected business threshold is `0.19`; on the final test set it increases default recall from 0.551 to 0.724 while routing more applicants to review. See `reports/final_model_metrics.csv` for the complete results.
 
 ## Dashboard
 
@@ -106,10 +116,12 @@ The Django dashboard includes:
 - Low / Medium / High risk category
 - recommended action based on the business threshold
 - top local factors influencing the applicant score
+- validated input errors and out-of-distribution warnings
 - model comparison chart
 - threshold tradeoff chart
 - confusion matrix
 - permutation importance chart
+- probability calibration and age-group monitoring diagnostics
 
 Run it with:
 
@@ -179,15 +191,40 @@ http://127.0.0.1:8000/
 - `notebooks/bank.ipynb`: polished analysis notebook with EDA, modeling workflow, and final report.
 - `src/train_model.py`: reusable training script with leakage-safe preprocessing, model tuning, threshold tuning, report generation, and model saving.
 - `models/credit_risk_model.pkl`: compressed model bundle used by the dashboard.
+- `models/model_manifest.json`: model/data hashes and reproducibility metadata.
 - `reports/business_report.md`: concise final business interpretation.
+- `MODEL_CARD.md` and `DATA_CARD.md`: intended use, limitations, provenance, and controls.
 - `manage.py`: Django command entry point.
 - `bankrisk_compass/settings.py`: Django project settings.
 - `app/views.py`: Django dashboard pages.
 - `app/services.py`: model loading, scoring, report loading, and dashboard data helpers.
 
-## Next Improvements
+## Validation
 
-- Add calibration analysis to make probabilities more reliable.
-- Add model monitoring for drift in applicant income, loan amount, and default rate.
-- Add fairness checks across age groups or other legally appropriate protected attributes.
-- Connect the dashboard to a database or API for real-time scoring.
+```bash
+python manage.py migrate
+python manage.py check
+python manage.py test
+python -m compileall -q app bankrisk_compass src
+```
+
+The GitHub Actions workflow runs these checks for pushes and pull requests.
+
+Compare a new batch with the training distribution:
+
+```bash
+python -m src.monitor_model --data path/to/new_applicants.csv
+```
+
+The command writes PSI/total-variation diagnostics to `reports/drift_monitoring.csv`.
+
+## Scoring API
+
+Set `SCORING_API_KEY`, then send validated JSON to `POST /api/v1/score/` with
+either `X-API-Key` or `Authorization: Bearer <key>`. The API returns a versioned
+probability and screening recommendation without performing the slower SHAP step.
+If no API key is configured, the endpoint remains disabled.
+
+## Important limitation
+
+This is a demonstration and decision-support project, not a production credit decision engine. Operational use requires independent validation, representative data, authenticated access, durable monitoring, fair-lending review, and compliant adverse-action procedures.

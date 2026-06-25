@@ -1,0 +1,25 @@
+{
+  "model_version": "2.0.0",
+  "trained_at_utc": "2026-06-25T17:30:41.978296+00:00",
+  "model_sha256": "4c6743847104126b8f4a88dc2ac4db49c8c4a8f2163313fc5bafbe5121c196c0",
+  "data_sha256": "f56c566de00c25e0979a402afc57442fd20e1f4763cf16afc818bf35040df9ef",
+  "git_commit": "ef19b9625f095e9b7341cdb7bf3c40936c83fe1c",
+  "git_dirty": true,
+  "features": [
+    "person_income",
+    "person_emp_length",
+    "loan_amnt",
+    "loan_percent_income",
+    "cb_person_cred_hist_length",
+    "person_home_ownership",
+    "loan_intent",
+    "cb_person_default_on_file"
+  ],
+  "excluded_lender_assigned_features": [
+    "loan_int_rate",
+    "loan_grade"
+  ],
+  "excluded_policy_features": [
+    "person_age"
+  ]
+}

@@ -6,6 +6,9 @@ from . import views
 
 
 urlpatterns = [
+    path("healthz/", views.health, name="health"),
+    path("readyz/", views.readiness, name="readiness"),
+    path("api/v1/score/", views.score_api, name="score-api"),
     path("", views.overview, name="overview"),
     path("assessment/", views.assessment, name="assessment"),
     path("insights/", views.insights, name="insights"),

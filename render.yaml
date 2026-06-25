@@ -4,8 +4,8 @@ services:
     runtime: python
     plan: free
     buildCommand: bash build.sh
-    startCommand: gunicorn bankrisk_compass.wsgi:application
-    healthCheckPath: /
+    startCommand: gunicorn bankrisk_compass.wsgi:application --workers 2 --threads 2 --timeout 120
+    healthCheckPath: /healthz/
     envVars:
       - key: PYTHON_VERSION
         value: 3.13.9
@@ -15,3 +15,9 @@ services:
         generateValue: true
       - key: SECURE_SSL_REDIRECT
         value: "True"
+      - key: SECURE_HSTS_INCLUDE_SUBDOMAINS
+        value: "True"
+      - key: SECURE_HSTS_PRELOAD
+        value: "True"
+      - key: SCORING_API_KEY
+        generateValue: true

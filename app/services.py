@@ -3,7 +3,10 @@ from __future__ import annotations
 import html
 import io
 import csv
+import hashlib
+import json
 import logging
+from hmac import compare_digest
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
@@ -20,6 +23,7 @@ LOGGER = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_PATH = PROJECT_ROOT / "data" / "credit_risk.csv"
 MODEL_PATH = PROJECT_ROOT / "models" / "credit_risk_model.pkl"
+MODEL_MANIFEST_PATH = PROJECT_ROOT / "models" / "model_manifest.json"
 REPORTS_DIR = PROJECT_ROOT / "reports"
 
 REPORT_ARTIFACTS = {
@@ -33,6 +37,12 @@ REPORT_ARTIFACTS = {
     "threshold_analysis.csv",
     "threshold_tradeoff.png",
     "confusion_matrix.png",
+    "calibration_analysis.csv",
+    "calibration_curve.png",
+    "fairness_age_groups.csv",
+    "threshold_selection_validation.csv",
+    "metric_confidence_intervals.csv",
+    "drift_monitoring.csv",
 }
 
 COLUMN_LABELS = {
@@ -44,6 +54,9 @@ COLUMN_LABELS = {
     "recall": "Recall",
     "f1_score": "F1-score",
     "roc_auc": "ROC-AUC",
+    "average_precision": "Average Precision",
+    "brier_score": "Brier Score",
+    "evaluation_split": "Evaluation Split",
     "true_negatives": "True Negatives",
     "false_positives": "False Positives",
     "false_negatives": "False Negatives",
@@ -63,13 +76,35 @@ INTENT_LABELS = {
 }
 
 
+class ArtifactIntegrityError(RuntimeError):
+    pass
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 @lru_cache(maxsize=1)
 def load_model_bundle() -> dict[str, Any]:
     if not MODEL_PATH.exists():
         raise FileNotFoundError(
             "Model file not found. Run `python -m src.train_model --quick` from the project root first."
         )
-    return joblib.load(MODEL_PATH)
+    if not MODEL_MANIFEST_PATH.exists():
+        raise FileNotFoundError("Model manifest not found. Regenerate the model artifacts.")
+    manifest = json.loads(MODEL_MANIFEST_PATH.read_text(encoding="utf-8"))
+    expected_hash = str(manifest.get("model_sha256", ""))
+    if not expected_hash or not compare_digest(_sha256(MODEL_PATH), expected_hash):
+        raise ArtifactIntegrityError("Model artifact integrity verification failed.")
+
+    bundle = joblib.load(MODEL_PATH)
+    if str(bundle.get("model_version")) != str(manifest.get("model_version")):
+        raise ArtifactIntegrityError("Model version does not match its manifest.")
+    return bundle
 
 
 @lru_cache(maxsize=1)
@@ -94,7 +129,22 @@ def load_text_report(file_name: str) -> str:
 
 
 def predict_default_probability(bundle: dict[str, Any], application: pd.DataFrame) -> float:
-    return float(bundle["pipeline"].predict_proba(application)[:, 1][0])
+    predictor = bundle.get("predictor", bundle["pipeline"])
+    return float(predictor.predict_proba(application)[:, 1][0])
+
+
+def model_metadata(bundle: dict[str, Any]) -> dict[str, str]:
+    trained_at = str(bundle.get("trained_at_utc", "Unavailable"))
+    if "T" in trained_at:
+        trained_at = trained_at.split("T", maxsplit=1)[0]
+    revision = str(bundle.get("git_commit", "unavailable"))[:8]
+    if bundle.get("git_dirty"):
+        revision = f"{revision}+dirty"
+    return {
+        "version": str(bundle.get("model_version", "legacy")),
+        "trained_at": trained_at,
+        "git_commit": revision,
+    }
 
 
 def risk_category(probability: float, bundle: dict[str, Any]) -> tuple[str, str, str]:
@@ -323,6 +373,8 @@ def dashboard_data() -> dict[str, Any]:
     comparison = load_report_csv("model_comparison.csv")
     final_metrics = load_report_csv("final_model_metrics.csv")
     threshold_table = load_report_csv("threshold_analysis.csv")
+    calibration = load_report_csv("calibration_analysis.csv")
+    fairness = load_report_csv("fairness_age_groups.csv")
     importance = get_importance(bundle)
 
     threshold = float(bundle.get("threshold", 0.5))
@@ -358,6 +410,8 @@ def dashboard_data() -> dict[str, Any]:
         "comparison": comparison,
         "final_metrics": final_metrics,
         "threshold_table": threshold_table,
+        "calibration": calibration,
+        "fairness": fairness,
         "importance": importance,
         "threshold": threshold,
         "default_metrics": default_metrics,
@@ -383,129 +437,39 @@ def threshold_summary_context(
     }
 
 
-def _float_from_payload(
-    payload: Any,
-    key: str,
-    default: float,
-    minimum: float,
-    maximum: float,
-) -> float:
-    try:
-        value = float(payload.get(key, default))
-    except (TypeError, ValueError):
-        value = default
-    return min(max(value, minimum), maximum)
-
-
-def _int_from_payload(
-    payload: Any,
-    key: str,
-    default: int,
-    minimum: int,
-    maximum: int,
-) -> int:
-    return int(round(_float_from_payload(payload, key, float(default), minimum, maximum)))
-
-
-def _choice_from_payload(
-    payload: Any,
-    key: str,
-    choices: list[str],
-    default: str,
-) -> str:
-    value = str(payload.get(key, default))
-    return value if value in choices else default
-
-
-def application_from_payload(
+def application_from_cleaned_data(
     bundle: dict[str, Any],
-    payload: Any | None,
+    cleaned_data: dict[str, Any],
 ) -> tuple[dict[str, Any], pd.DataFrame]:
-    reference = bundle["feature_reference"]
-    medians = reference["numeric_medians"]
-    modes = reference["categorical_modes"]
-    options = reference["categorical_options"]
-    payload = payload or {}
-
-    values = {
-        "person_age": _int_from_payload(payload, "person_age", int(medians["person_age"]), 18, 100),
-        "person_income": _int_from_payload(
-            payload,
-            "person_income",
-            int(medians["person_income"]),
-            0,
-            2_000_000,
-        ),
-        "person_emp_length": _float_from_payload(
-            payload,
-            "person_emp_length",
-            float(round(medians["person_emp_length"], 1)),
-            0.0,
-            60.0,
-        ),
-        "loan_amnt": _int_from_payload(payload, "loan_amnt", int(medians["loan_amnt"]), 500, 500_000),
-        "loan_int_rate": _float_from_payload(
-            payload,
-            "loan_int_rate",
-            float(round(medians["loan_int_rate"], 2)),
-            0.0,
-            40.0,
-        ),
-        "cb_person_cred_hist_length": _int_from_payload(
-            payload,
-            "cb_person_cred_hist_length",
-            int(medians["cb_person_cred_hist_length"]),
-            0,
-            50,
-        ),
-        "person_home_ownership": _choice_from_payload(
-            payload,
-            "person_home_ownership",
-            options["person_home_ownership"],
-            modes["person_home_ownership"],
-        ),
-        "loan_intent": _choice_from_payload(
-            payload,
-            "loan_intent",
-            options["loan_intent"],
-            modes["loan_intent"],
-        ),
-        "loan_grade": _choice_from_payload(
-            payload,
-            "loan_grade",
-            options["loan_grade"],
-            modes["loan_grade"],
-        ),
-        "cb_person_default_on_file": _choice_from_payload(
-            payload,
-            "cb_person_default_on_file",
-            options["cb_person_default_on_file"],
-            modes["cb_person_default_on_file"],
-        ),
-    }
+    values = dict(cleaned_data)
     income = float(values["person_income"])
-    loan_percent_income = float(values["loan_amnt"]) / income if income else 1.0
+    loan_percent_income = float(values["loan_amnt"]) / income
     values["loan_percent_income"] = float(round(loan_percent_income, 4))
 
     application = pd.DataFrame([values])[bundle["features"]]
     return values, application
 
 
-def assessment_result(bundle: dict[str, Any], payload: Any | None) -> dict[str, Any]:
-    form, application = application_from_payload(bundle, payload)
+def assessment_result(
+    bundle: dict[str, Any],
+    cleaned_data: dict[str, Any],
+    *,
+    explain: bool = True,
+) -> dict[str, Any]:
+    form, application = application_from_cleaned_data(bundle, cleaned_data)
     probability = predict_default_probability(bundle, application)
     category, category_class, category_color = risk_category(probability, bundle)
     threshold = float(bundle.get("threshold", 0.5))
     prediction = "Likely Default" if probability >= threshold else "Likely Non-default"
     if probability >= threshold:
-        decision = "Manual review before approval" if category != "High" else "Manual review or decline"
+        decision = "Manual review required" if category != "High" else "Enhanced manual review required"
     else:
-        decision = "Approve with monitoring"
+        decision = "Proceed to standard underwriting"
 
     snapshot = []
-    row = application.iloc[0].to_dict()
-    for feature in bundle["features"]:
-        value = row[feature]
+    display_features = ["person_age", *bundle["features"]]
+    for feature in display_features:
+        value = form[feature]
         if feature == "loan_percent_income":
             display_value = format_percent(float(value))
         elif feature in {"person_income", "loan_amnt"}:
@@ -516,11 +480,15 @@ def assessment_result(bundle: dict[str, Any], payload: Any | None) -> dict[str, 
             display_value = str(value)
         snapshot.append({"feature": pretty_feature_name(feature), "value": display_value})
 
-    explanation_rows, explanation_method = applicant_explanations(
-        bundle,
-        application,
-        form,
-    )
+    if explain:
+        explanation_rows, explanation_method = applicant_explanations(
+            bundle,
+            application,
+            form,
+        )
+    else:
+        explanation_rows = []
+        explanation_method = "Explanation omitted for low-latency API scoring."
 
     return {
         "form": form,
@@ -538,6 +506,16 @@ def assessment_result(bundle: dict[str, Any], payload: Any | None) -> dict[str, 
         "explanation_rows": explanation_rows,
         "explanation_method": explanation_method,
     }
+
+
+def feature_digest(application: pd.DataFrame) -> str:
+    payload = json.dumps(
+        application.iloc[0].to_dict(),
+        sort_keys=True,
+        default=str,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 @lru_cache(maxsize=2)
@@ -760,10 +738,6 @@ def policy_applicant_explanations(form: dict[str, Any]) -> list[dict[str, str]]:
     return rows
 
 
-def form_options(bundle: dict[str, Any]) -> dict[str, list[str]]:
-    return bundle["feature_reference"]["categorical_options"]
-
-
 def report_artifact_path(file_name: str) -> Path | None:
     if file_name not in REPORT_ARTIFACTS:
         return None
@@ -779,13 +753,16 @@ def report_summary(dashboard: dict[str, Any]) -> dict[str, Any]:
     default_rate = float(data["loan_status"].mean())
     business_metrics = dashboard["business_metrics"]
     default_metrics = dashboard["default_metrics"]
+    metadata = model_metadata(dashboard["bundle"])
 
     return {
         "model_summary": [
             {"label": "Best model", "value": str(dashboard["best_model"])},
+            {"label": "Model version", "value": metadata["version"]},
+            {"label": "Trained", "value": metadata["trained_at"]},
             {"label": "F1-score", "value": format_score(float(dashboard["best_f1"]))},
             {"label": "ROC-AUC", "value": format_score(float(default_metrics["roc_auc"]))},
-            {"label": "Model type", "value": "Leakage-safe scikit-learn Pipeline"},
+            {"label": "Model type", "value": "Calibrated leakage-safe Pipeline"},
         ],
         "dataset_summary": [
             {"label": "Applicants", "value": f"{len(data):,}"},
@@ -812,9 +789,9 @@ def report_summary(dashboard: dict[str, Any]) -> dict[str, Any]:
             },
         ],
         "business_recommendation": (
-            "Use the recommended business threshold for screening, send borderline or high-risk "
-            "applications to manual review, and test a second model without lender-assigned fields "
-            "such as loan grade and interest rate."
+            "Use the recommended threshold only for screening and route flagged applications to "
+            "human review. The production scoring path excludes lender-assigned grade and pricing; "
+            "review calibration, drift, and subgroup diagnostics before operational use."
         ),
     }
 

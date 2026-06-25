@@ -55,6 +55,10 @@ set "DEBUG=True"
 set "SECURE_SSL_REDIRECT=False"
 set "ALLOWED_HOSTS=127.0.0.1,localhost"
 
+echo Preparing the local audit database...
+"%VENV_PYTHON%" manage.py migrate --no-input
+if errorlevel 1 goto :setup_failed
+
 echo.
 echo BankRisk Compass is opening at:
 echo http://127.0.0.1:8000/

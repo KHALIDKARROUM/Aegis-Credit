@@ -1,13 +1,24 @@
 from __future__ import annotations
 
 import mimetypes
+import logging
+import json
 
-from django.http import FileResponse, Http404, HttpRequest, HttpResponse
+from django.conf import settings
+from django.utils.crypto import constant_time_compare
+from django.db import DatabaseError
+from django.http import FileResponse, Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
+from django.views.decorators.cache import never_cache
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
 
 from . import services
+from .forms import ApplicantAssessmentForm
+from .models import PredictionAudit
 
 
+LOGGER = logging.getLogger(__name__)
 PAGES = [
     {"number": "01", "key": "overview", "label": "Overview", "url_name": "overview"},
     {"number": "02", "key": "assessment", "label": "Loan Assessment", "url_name": "assessment"},
@@ -22,16 +33,18 @@ def base_context(active_page: str) -> tuple[dict[str, object], dict[str, object]
         "pages": PAGES,
         "active_page": active_page,
         "best_model": "Unavailable",
+        "model_meta": {"version": "unavailable", "trained_at": "unavailable"},
         "display_date": services.display_date(),
     }
 
     try:
         dashboard = services.dashboard_data()
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, services.ArtifactIntegrityError) as exc:
         context["error_message"] = str(exc)
         return context, None
 
     context["best_model"] = dashboard["best_model"]
+    context["model_meta"] = services.model_metadata(dashboard["bundle"])
     return context, dashboard
 
 
@@ -111,9 +124,26 @@ def assessment(request: HttpRequest) -> HttpResponse:
         return render(request, "app/assessment.html", context)
 
     bundle = dashboard["bundle"]
-    payload = request.POST if request.method == "POST" else None
-    context.update(services.assessment_result(bundle, payload))
-    context["options"] = services.form_options(bundle)
+    form = ApplicantAssessmentForm(
+        request.POST or None,
+        bundle=bundle,
+    )
+    context.update(
+        {
+            "assessment_form": form,
+            "has_result": False,
+            "threshold": float(bundle.get("threshold", 0.5)),
+            "distribution_warnings": [],
+        }
+    )
+
+    if request.method == "POST" and form.is_valid():
+        result = services.assessment_result(bundle, form.cleaned_data)
+        context.update(result)
+        context["has_result"] = True
+        context["distribution_warnings"] = form.distribution_warnings()
+        _write_prediction_audit(result, bundle)
+
     return render(request, "app/assessment.html", context)
 
 
@@ -223,12 +253,24 @@ def reports(request: HttpRequest) -> HttpResponse:
                 dashboard["final_metrics"],
                 digits=3,
             ),
+            "calibration_table": services.dataframe_table(
+                dashboard["calibration"],
+                digits=3,
+            ),
+            "fairness_table": services.dataframe_table(
+                dashboard["fairness"],
+                digits=3,
+            ),
             "artifact_rows": [
                 {"artifact": "business_report.md", "purpose": "Final written interpretation"},
                 {"artifact": "model_comparison.csv", "purpose": "Model comparison metrics"},
                 {"artifact": "final_model_metrics.csv", "purpose": "Default and business threshold metrics"},
                 {"artifact": "threshold_analysis.csv", "purpose": "Precision/recall/cost by threshold"},
                 {"artifact": "permutation_importance.csv", "purpose": "Global model drivers"},
+                {"artifact": "calibration_analysis.csv", "purpose": "Probability calibration diagnostics"},
+                {"artifact": "fairness_age_groups.csv", "purpose": "Age-group monitoring diagnostics"},
+                {"artifact": "metric_confidence_intervals.csv", "purpose": "Bootstrap uncertainty intervals"},
+                {"artifact": "drift_monitoring.csv", "purpose": "Latest feature-distribution drift check"},
                 {"artifact": "credit_risk_model.pkl", "purpose": "Saved model bundle"},
             ],
         }
@@ -263,3 +305,91 @@ def report_artifact(request: HttpRequest, file_name: str) -> FileResponse:
 
     content_type, _ = mimetypes.guess_type(str(path))
     return FileResponse(path.open("rb"), content_type=content_type or "application/octet-stream")
+
+
+@never_cache
+def health(request: HttpRequest) -> JsonResponse:
+    return JsonResponse({"status": "ok"})
+
+
+@never_cache
+def readiness(request: HttpRequest) -> JsonResponse:
+    try:
+        bundle = services.load_model_bundle()
+        services.load_credit_data()
+    except Exception as exc:
+        LOGGER.exception("Readiness check failed: %s", exc)
+        return JsonResponse({"status": "not-ready"}, status=503)
+
+    return JsonResponse(
+        {
+            "status": "ready",
+            "model_version": str(bundle.get("model_version", "legacy")),
+        }
+    )
+
+
+def _write_prediction_audit(result: dict[str, object], bundle: dict[str, object]) -> None:
+    try:
+        PredictionAudit.objects.create(
+            feature_digest=services.feature_digest(result["application"]),
+            probability=result["probability"],
+            threshold=result["threshold"],
+            risk_category=result["category"],
+            decision=result["decision"],
+            model_version=str(bundle.get("model_version", "legacy")),
+        )
+    except DatabaseError:
+        LOGGER.exception("Prediction audit could not be stored.")
+
+
+@csrf_exempt
+@require_POST
+def score_api(request: HttpRequest) -> JsonResponse:
+    configured_key = settings.SCORING_API_KEY
+    if not configured_key:
+        return JsonResponse({"error": "Scoring API is not configured."}, status=503)
+
+    supplied_key = request.headers.get("X-API-Key", "")
+    authorization = request.headers.get("Authorization", "")
+    if authorization.startswith("Bearer "):
+        supplied_key = authorization.removeprefix("Bearer ").strip()
+    if not constant_time_compare(supplied_key, configured_key):
+        return JsonResponse({"error": "Unauthorized."}, status=401)
+
+    try:
+        payload = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Request body must be valid JSON."}, status=400)
+    if not isinstance(payload, dict):
+        return JsonResponse({"error": "Request body must be a JSON object."}, status=400)
+
+    try:
+        bundle = services.load_model_bundle()
+    except Exception:
+        LOGGER.exception("Scoring API model load failed.")
+        return JsonResponse({"error": "Model is unavailable."}, status=503)
+
+    form = ApplicantAssessmentForm(payload, bundle=bundle)
+    if not form.is_valid():
+        return JsonResponse(
+            {
+                "error": "Validation failed.",
+                "fields": form.errors.get_json_data(),
+            },
+            status=400,
+        )
+
+    result = services.assessment_result(bundle, form.cleaned_data, explain=False)
+    _write_prediction_audit(result, bundle)
+    return JsonResponse(
+        {
+            "model_version": str(bundle.get("model_version", "legacy")),
+            "probability": round(float(result["probability"]), 6),
+            "risk_category": result["category"],
+            "screening_result": result["prediction"],
+            "recommended_next_step": result["decision"],
+            "threshold": result["threshold"],
+            "warnings": form.distribution_warnings(),
+        }
+    )

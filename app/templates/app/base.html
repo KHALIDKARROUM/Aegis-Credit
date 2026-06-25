@@ -4,40 +4,46 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>BankRisk Compass</title>
+    <meta name="description" content="Governed credit default risk decision-support dashboard.">
+    <title>{% block title %}BankRisk Compass{% endblock %}</title>
     <link rel="stylesheet" href="{% static 'app/styles.css' %}">
+    <script src="{% static 'app/app.js' %}" defer></script>
 </head>
 <body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
     <div class="app-shell">
         <aside class="sidebar">
-            <div class="compass-logo"><div class="compass-dot"></div></div>
+            <div class="sidebar-brand" aria-label="BankRisk Compass">
+                <div class="compass-logo" aria-hidden="true"><div class="compass-dot"></div></div>
+                <span>BankRisk</span>
+            </div>
             <nav class="nav-stack" aria-label="Dashboard navigation">
                 {% for item in pages %}
-                    <a class="nav-link {% if item.key == active_page %}active{% endif %}" href="{% url item.url_name %}">
+                    <a class="nav-link {% if item.key == active_page %}active{% endif %}" href="{% url item.url_name %}" {% if item.key == active_page %}aria-current="page"{% endif %}>
                         <span class="nav-number">{{ item.number }}</span>
                         <span>{{ item.label }}</span>
                     </a>
                 {% endfor %}
             </nav>
             <div class="governance">
-                <strong>Model governed</strong><br>
-                <small>Version 1.0.3</small><span class="green-dot"></span>
+                <span class="status-line"><span class="green-dot"></span> Decision-support model</span>
+                <small>Version {{ model_meta.version }} · trained {{ model_meta.trained_at }}</small>
             </div>
         </aside>
 
-        <main class="main-content">
+        <main class="main-content" id="main-content">
             <header class="page-header">
                 <div>
                     <div class="brand-row">
                         <h1 class="brand-title">BankRisk Compass</h1>
-                        <span class="model-badge">Best model: {{ best_model }}</span>
+                        <span class="model-badge"><span class="green-dot"></span>{{ best_model }}</span>
                     </div>
-                    <div class="brand-subtitle">Credit Default Risk Modeling</div>
+                    <div class="brand-subtitle">Application-time credit risk decision support</div>
                 </div>
                 <div class="header-actions">
                     <div>{{ display_date }}</div>
                     <div class="header-divider"></div>
-                    <div>Risk Analyst</div>
+                    <div>Model v{{ model_meta.version }}</div>
                 </div>
             </header>
 
@@ -51,8 +57,8 @@
             {% endif %}
 
             <footer class="footer-row">
-                <div>Data, charts, thresholds, and reports are generated from this project's saved artifacts.</div>
-                <div>Dashboard date: {{ display_date }}</div>
+                <div>Decision support only. Final credit decisions require human review and applicable compliance controls.</div>
+                <div>Artifact {{ model_meta.git_commit }}</div>
             </footer>
         </main>
     </div>
