@@ -1,16 +1,22 @@
 from __future__ import annotations
 
+import io
 import json
+import uuid
 from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
+from django.core.cache import cache
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 
 from app import services
 from app.forms import ApplicantAssessmentForm
-from app.models import PredictionAudit
+from app.models import AssessmentCase, BatchAssessment, PredictionAudit
 from src.train_model import (
     EXCLUDED_LENDER_ASSIGNED_FEATURES,
     FEATURES,
@@ -48,6 +54,14 @@ class ApplicantAssessmentFormTests(SimpleTestCase):
     def test_valid_application(self) -> None:
         form = ApplicantAssessmentForm(self.valid_payload(), bundle=self.bundle)
         self.assertTrue(form.is_valid(), form.errors)
+
+    def test_new_form_is_blank_unless_demo_is_requested(self) -> None:
+        form = ApplicantAssessmentForm(bundle=self.bundle)
+        self.assertIsNone(form["person_income"].value())
+        self.assertIsNone(form["person_home_ownership"].value())
+        demo = ApplicantAssessmentForm(bundle=self.bundle, use_demo=True)
+        self.assertEqual(demo["person_income"].value(), 55000)
+        self.assertEqual(demo["person_home_ownership"].value(), "RENT")
 
     def test_zero_income_is_rejected(self) -> None:
         payload = self.valid_payload()
@@ -94,8 +108,13 @@ class ServiceTests(SimpleTestCase):
             "split_sizes",
             "runtime_versions",
             "predictor",
+            "model_name",
         ):
             self.assertIn(key, self.bundle)
+
+    def test_legacy_risk_bands_keep_manual_review_reachable(self) -> None:
+        category, _, _ = services.risk_category(0.25, self.bundle)
+        self.assertEqual(category, "Medium")
 
     def test_application_frame_matches_model_contract(self) -> None:
         cleaned = {
@@ -138,6 +157,53 @@ class ServiceTests(SimpleTestCase):
         self.assertEqual(int((data["person_age"] > 100).sum()), 0)
         self.assertEqual(int((data["person_emp_length"] > 60).sum()), 0)
 
+    @override_settings(AUDIT_HMAC_KEY="test-hmac-key")
+    def test_feature_digest_is_keyed(self) -> None:
+        application = pd.DataFrame([{"person_income": 65000}])
+        digest = services.feature_digest(application)
+        plain = __import__("hashlib").sha256(
+            json.dumps(
+                application.iloc[0].to_dict(),
+                sort_keys=True,
+                default=str,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        self.assertNotEqual(digest, plain)
+
+    def test_business_economics_returns_a_recommended_threshold(self) -> None:
+        table = pd.DataFrame(
+            [
+                {
+                    "threshold": 0.2,
+                    "false_negatives": 10,
+                    "false_positives": 20,
+                    "true_negatives": 70,
+                    "true_positives": 30,
+                    "precision": 0.6,
+                    "recall": 0.75,
+                },
+                {
+                    "threshold": 0.5,
+                    "false_negatives": 20,
+                    "false_positives": 5,
+                    "true_negatives": 85,
+                    "true_positives": 20,
+                    "precision": 0.8,
+                    "recall": 0.5,
+                },
+            ]
+        )
+        result = services.business_economics(
+            table,
+            average_exposure=10000,
+            loss_given_default=0.6,
+            annual_margin=0.08,
+            review_cost=35,
+        )
+        self.assertIn("estimated_total_cost", result["table"])
+        self.assertIn("threshold", result["recommended"])
+
 
 class DashboardViewTests(TestCase):
     def valid_payload(self) -> dict[str, str]:
@@ -166,7 +232,28 @@ class DashboardViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.context["has_result"])
         assessment_result.assert_not_called()
-        self.assertContains(response, "No prediction is generated before submission")
+        self.assertContains(response, "Ready for an application")
+        self.assertNotContains(response, "Model Insights")
+        self.assertNotContains(response, "Threshold Analysis")
+        self.assertNotContains(response, "Model v")
+
+    def test_home_page_is_the_client_assessment(self) -> None:
+        response = self.client.get(reverse("overview"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Show assessment")
+        self.assertContains(response, "People stay in control")
+
+    def test_operational_pages_are_available_in_local_mode(self) -> None:
+        for route_name in (
+            "case-list",
+            "batch-upload",
+            "monitoring",
+            "business-policy",
+            "reports",
+            "api-docs",
+        ):
+            response = self.client.get(reverse(route_name))
+            self.assertEqual(response.status_code, 200)
 
     def test_invalid_post_shows_errors_without_audit_record(self) -> None:
         payload = self.valid_payload()
@@ -184,18 +271,21 @@ class DashboardViewTests(TestCase):
                 {
                     "factor": "Income",
                     "detail": "Test explanation",
-                    "impact": "Lowers model risk",
+                    "impact": "Reduces risk",
                     "class": "positive",
                 }
             ],
             "Test method",
+            "model",
         )
         response = self.client.post(reverse("assessment"), self.valid_payload())
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.context["has_result"])
         audit = PredictionAudit.objects.get()
         self.assertEqual(len(audit.feature_digest), 64)
-        self.assertEqual(audit.model_version, "2.0.0")
+        self.assertEqual(audit.digest_version, "hmac-sha256-v1")
+        self.assertEqual(audit.model_version, "2.1.0")
+        self.assertEqual(AssessmentCase.objects.count(), 1)
 
     def test_report_downloads_and_allowlist(self) -> None:
         self.assertEqual(self.client.get(reverse("download-summary-csv")).status_code, 200)
@@ -239,12 +329,99 @@ class DashboardViewTests(TestCase):
 
     @override_settings(SCORING_API_KEY="test-api-key")
     def test_scoring_api_returns_versioned_result(self) -> None:
+        request_id = str(uuid.uuid4())
         response = self.client.post(
             reverse("score-api"),
             data=json.dumps(self.valid_payload()),
             content_type="application/json",
             HTTP_AUTHORIZATION="Bearer test-api-key",
+            HTTP_IDEMPOTENCY_KEY=request_id,
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["model_version"], "2.0.0")
+        self.assertEqual(response.json()["model_version"], "2.1.0")
         self.assertIn("probability", response.json())
+        replay = self.client.post(
+            reverse("score-api"),
+            data=json.dumps(self.valid_payload()),
+            content_type="application/json",
+            HTTP_AUTHORIZATION="Bearer test-api-key",
+            HTTP_IDEMPOTENCY_KEY=request_id,
+        )
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(replay["Idempotent-Replay"], "true")
+        self.assertEqual(AssessmentCase.objects.filter(source="api").count(), 1)
+
+    @override_settings(SCORING_API_KEY="rate-test-key", API_RATE_LIMIT_PER_MINUTE=1)
+    def test_scoring_api_rate_limit(self) -> None:
+        cache.clear()
+        first = self.client.post(
+            reverse("score-api"),
+            data=json.dumps(self.valid_payload()),
+            content_type="application/json",
+            HTTP_X_API_KEY="rate-test-key",
+        )
+        second = self.client.post(
+            reverse("score-api"),
+            data=json.dumps(self.valid_payload()),
+            content_type="application/json",
+            HTTP_X_API_KEY="rate-test-key",
+        )
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 429)
+        self.assertEqual(second["Retry-After"], "60")
+
+    @override_settings(SCORING_API_KEY="test-api-key")
+    def test_scoring_api_rejects_invalid_idempotency_key(self) -> None:
+        response = self.client.post(
+            reverse("score-api"),
+            data=json.dumps(self.valid_payload()),
+            content_type="application/json",
+            HTTP_X_API_KEY="test-api-key",
+            HTTP_IDEMPOTENCY_KEY="not-a-uuid",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_batch_csv_separates_valid_and_invalid_rows(self) -> None:
+        content = (
+            "applicant_reference,person_age,person_income,person_emp_length,"
+            "person_home_ownership,loan_amnt,loan_intent,"
+            "cb_person_cred_hist_length,cb_person_default_on_file\n"
+            "GOOD-1,30,65000,5,RENT,8000,PERSONAL,6,N\n"
+            "BAD-1,30,0,5,RENT,8000,PERSONAL,6,N\n"
+        )
+        upload = SimpleUploadedFile(
+            "applications.csv",
+            content.encode(),
+            content_type="text/csv",
+        )
+        response = self.client.post(reverse("batch-upload"), {"file": upload})
+        self.assertEqual(response.status_code, 302)
+        batch = BatchAssessment.objects.get()
+        self.assertEqual(batch.valid_rows, 1)
+        self.assertEqual(batch.invalid_rows, 1)
+
+    def test_override_requires_reason(self) -> None:
+        response = self.client.post(reverse("assessment"), self.valid_payload())
+        case = AssessmentCase.objects.latest("created_at")
+        response = self.client.post(
+            reverse("case-detail", args=[case.id]),
+            {
+                "status": AssessmentCase.Status.IN_REVIEW,
+                "reviewer_notes": "",
+                "override_decision": AssessmentCase.OverrideDecision.MANUAL,
+                "override_reason": "",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Explain why")
+
+    @override_settings(LOGIN_REQUIRED=True)
+    def test_protected_page_requires_login_and_role(self) -> None:
+        response = self.client.get(reverse("case-list"))
+        self.assertEqual(response.status_code, 302)
+        user = get_user_model().objects.create_user("analyst", password="safe-test-password")
+        group, _ = Group.objects.get_or_create(name="Analysts")
+        user.groups.add(group)
+        self.client.login(username="analyst", password="safe-test-password")
+        self.assertEqual(self.client.get(reverse("case-list")).status_code, 200)
+        self.assertEqual(self.client.get(reverse("monitoring")).status_code, 403)

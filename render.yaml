@@ -1,3 +1,11 @@
+databases:
+  - name: bankrisk-compass-db
+    plan: basic-256mb
+    region: frankfurt
+    databaseName: bankrisk_compass
+    user: bankrisk_compass
+    ipAllowList: []
+
 services:
   - type: web
     name: bankrisk-compass
@@ -11,8 +19,16 @@ services:
         value: 3.13.9
       - key: DEBUG
         value: "False"
+      - key: LOGIN_REQUIRED
+        value: "True"
       - key: SECRET_KEY
         generateValue: true
+      - key: AUDIT_HMAC_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: bankrisk-compass-db
+          property: connectionString
       - key: SECURE_SSL_REDIRECT
         value: "True"
       - key: SECURE_HSTS_INCLUDE_SUBDOMAINS
@@ -21,3 +37,9 @@ services:
         value: "True"
       - key: SCORING_API_KEY
         generateValue: true
+      - key: BOOTSTRAP_ADMIN_USERNAME
+        sync: false
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        sync: false

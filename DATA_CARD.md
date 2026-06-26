@@ -26,6 +26,7 @@ duplicates and replaces implausible ages above 100 and employment lengths above
 
 The original upstream source and license are not documented in this repository.
 That provenance must be established before redistribution or operational use.
+The project MIT license does not cover `data/credit_risk.csv`.
 
 ## Representation and fairness limits
 
@@ -50,3 +51,6 @@ For production use, define:
 - drift baselines and alert thresholds;
 - target-label maturity and delayed-performance reporting;
 - periodic representativeness reviews.
+
+Feature-reference ranges and drift baselines are generated from training rows
+only. The final test set does not contribute to operational baselines.

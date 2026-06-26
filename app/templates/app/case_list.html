@@ -1,0 +1,70 @@
+{% extends "app/base.html" %}
+
+{% block title %}Assessment cases · BankRisk Compass{% endblock %}
+
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">Review workspace</span>
+        <h1>Assessment cases</h1>
+        <p>Search saved screenings, track review status, and record human decisions.</p>
+    </div>
+    <a class="primary-link" href="{% url 'overview' %}">New assessment</a>
+</section>
+
+<form class="panel filter-form" method="get">
+    <label>Search
+        <input name="q" value="{{ query }}" placeholder="Reference or case ID">
+    </label>
+    <label>Status
+        <select name="status">
+            <option value="">All statuses</option>
+            {% for value, label in status_choices %}
+                <option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    <label>Risk
+        <select name="risk">
+            <option value="">All risk levels</option>
+            {% for value in risk_choices %}
+                <option value="{{ value }}" {% if selected_risk == value %}selected{% endif %}>{{ value }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    <button class="secondary-button" type="submit">Apply filters</button>
+</form>
+
+<section class="panel data-panel">
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Created</th>
+                    <th>Reference</th>
+                    <th>Risk</th>
+                    <th>Probability</th>
+                    <th>Recommendation</th>
+                    <th>Status</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for case in cases %}
+                    <tr>
+                        <td>{{ case.created_at|date:"Y-m-d H:i" }}</td>
+                        <td>{{ case.applicant_reference|default:case.id }}</td>
+                        <td><span class="risk-pill {{ case.risk_category|lower }}">{{ case.risk_category }}</span></td>
+                        <td>{{ case.probability_percent }}</td>
+                        <td>{{ case.effective_recommendation }}</td>
+                        <td>{{ case.get_status_display }}</td>
+                        <td><a class="inline-link" href="{% url 'case-detail' case.id %}">Open</a></td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="7">No cases match these filters.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

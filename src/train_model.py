@@ -58,7 +58,7 @@ MODEL_MANIFEST_PATH = MODELS_DIR / "model_manifest.json"
 
 RANDOM_STATE = 42
 TARGET = "loan_status"
-MODEL_VERSION = "2.0.0"
+MODEL_VERSION = "2.1.0"
 FALSE_NEGATIVE_COST = 5
 FALSE_POSITIVE_COST = 1
 
@@ -428,10 +428,11 @@ def save_permutation_importance(
 
 
 def write_business_report(
+    model_name: str,
     final_metrics: dict[str, float],
     business_metrics: dict[str, float],
     threshold: float,
-    grid_search: GridSearchCV,
+    model_parameters: dict[str, Any],
     threshold_row: pd.Series,
     split_sizes: dict[str, int],
 ) -> None:
@@ -439,7 +440,7 @@ def write_business_report(
 
 ## Final Model
 
-The final model is a calibrated, leakage-safe Random Forest classifier. Missing values, scaling, and one-hot encoding are fitted only on training data. Probability calibration and the business threshold are selected on a separate validation set; the final metrics below are measured once on an untouched test set.
+The final model is a calibrated, leakage-safe {model_name} classifier. Missing values, scaling, and one-hot encoding are fitted only on training data. Model selection, probability calibration, and threshold selection use separate data partitions; the final metrics below are measured once on an untouched test set.
 
 Application-time scoring intentionally excludes lender-assigned fields (`loan_grade` and `loan_int_rate`) to avoid using information that may not exist when an applicant is first assessed.
 Age is also excluded from the probability model; it is retained only for input plausibility checks and subgroup monitoring.
@@ -447,13 +448,15 @@ Age is also excluded from the probability model; it is retained only for input p
 Data split:
 
 - Training: {split_sizes["train"]:,} rows
-- Validation/calibration: {split_sizes["validation"]:,} rows
+- Model selection: {split_sizes["selection"]:,} rows
+- Probability calibration: {split_sizes["calibration"]:,} rows
+- Threshold selection: {split_sizes["threshold"]:,} rows
 - Final test: {split_sizes["test"]:,} rows
 
-Best hyperparameters:
+Selected model parameters:
 
 ```text
-{grid_search.best_params_}
+{model_parameters}
 ```
 
 ## Default 0.50 Threshold Results
@@ -495,7 +498,11 @@ The model is a decision-support tool, not an autonomous approval system. The bus
     (REPORTS_DIR / "business_report.md").write_text(report, encoding="utf-8")
 
 
-def train_and_save(quick: bool = False) -> dict[str, Any]:
+def train_and_save(quick: bool = False, require_clean: bool = False) -> dict[str, Any]:
+    if require_clean and git_is_dirty():
+        raise RuntimeError(
+            "Refusing to produce a release artifact from a dirty Git worktree."
+        )
     MODELS_DIR.mkdir(exist_ok=True)
     REPORTS_DIR.mkdir(exist_ok=True)
 
@@ -510,39 +517,93 @@ def train_and_save(quick: bool = False) -> dict[str, Any]:
         random_state=RANDOM_STATE,
         stratify=y,
     )
-    X_train, X_validation, y_train, y_validation = train_test_split(
+    X_train, X_holdout, y_train, y_holdout = train_test_split(
         X_development,
         y_development,
         test_size=0.25,
         random_state=RANDOM_STATE,
         stratify=y_development,
     )
+    X_selection, X_calibration_threshold, y_selection, y_calibration_threshold = (
+        train_test_split(
+            X_holdout,
+            y_holdout,
+            test_size=0.60,
+            random_state=RANDOM_STATE,
+            stratify=y_holdout,
+        )
+    )
+    X_calibration, X_threshold, y_calibration, y_threshold = train_test_split(
+        X_calibration_threshold,
+        y_calibration_threshold,
+        test_size=0.50,
+        random_state=RANDOM_STATE,
+        stratify=y_calibration_threshold,
+    )
 
+    grid_search = tune_random_forest(X_train, y_train, quick=quick)
+    candidate_models = build_candidate_models()
+    candidate_models["Random Forest"] = grid_search.best_estimator_
+    candidate_artifacts: dict[str, tuple[Pipeline, Any, float]] = {}
     model_results = []
-    for name, model in build_candidate_models().items():
+    for name, model in candidate_models.items():
         model.fit(X_train, y_train)
-        result = evaluate_model(name, model, X_validation, y_validation)
-        result["evaluation_split"] = "validation"
+        calibrated_candidate = CalibratedClassifierCV(
+            FrozenEstimator(model),
+            method="sigmoid",
+        )
+        calibrated_candidate.fit(X_calibration, y_calibration)
+        threshold_probability = calibrated_candidate.predict_proba(X_threshold)[:, 1]
+        candidate_threshold = choose_business_threshold(
+            build_threshold_table(y_threshold, threshold_probability)
+        )
+        selection_probability = calibrated_candidate.predict_proba(X_selection)[:, 1]
+        selection_threshold_table = build_threshold_table(
+            y_selection,
+            selection_probability,
+        )
+        selection_row = selection_threshold_table.iloc[
+            (selection_threshold_table["threshold"] - candidate_threshold).abs().argsort()[:1]
+        ].iloc[0]
+        result = {
+            "model": name,
+            **evaluate_predictions(
+                y_selection,
+                selection_probability,
+                threshold=candidate_threshold,
+            ),
+            "decision_threshold": candidate_threshold,
+            "business_cost": int(selection_row["business_cost"]),
+            "evaluation_split": "selection_after_calibration_and_thresholding",
+        }
         model_results.append(result)
+        candidate_artifacts[name] = (model, calibrated_candidate, candidate_threshold)
 
-    results = pd.DataFrame(model_results).sort_values("f1_score", ascending=False)
+    results = pd.DataFrame(model_results).sort_values(
+        ["business_cost", "f1_score", "roc_auc"],
+        ascending=[True, False, False],
+    )
     results.to_csv(REPORTS_DIR / "model_comparison.csv", index=False)
     save_model_comparison_chart(results)
 
-    grid_search = tune_random_forest(X_train, y_train, quick=quick)
-    explanation_pipeline = grid_search.best_estimator_
-    calibrated_model = CalibratedClassifierCV(
-        FrozenEstimator(explanation_pipeline),
-        method="sigmoid",
+    model_name = str(results.iloc[0]["model"])
+    explanation_pipeline, calibrated_model, business_threshold = candidate_artifacts[model_name]
+    classifier = explanation_pipeline.named_steps["classifier"]
+    selected_parameter_names = (
+        ("n_estimators", "learning_rate", "max_depth", "min_samples_leaf")
+        if model_name == "Gradient Boosting"
+        else ("n_estimators", "max_depth", "min_samples_leaf", "class_weight")
+        if model_name == "Random Forest"
+        else ("C", "class_weight", "max_iter")
     )
-    calibrated_model.fit(X_validation, y_validation)
-
-    validation_probability = calibrated_model.predict_proba(X_validation)[:, 1]
-    validation_threshold_table = build_threshold_table(
-        y_validation,
-        validation_probability,
-    )
-    business_threshold = choose_business_threshold(validation_threshold_table)
+    classifier_parameters = classifier.get_params()
+    selected_model_parameters = {
+        name: classifier_parameters[name]
+        for name in selected_parameter_names
+        if name in classifier_parameters
+    }
+    threshold_probability = calibrated_model.predict_proba(X_threshold)[:, 1]
+    threshold_selection_table = build_threshold_table(y_threshold, threshold_probability)
 
     final_probability = calibrated_model.predict_proba(X_test)[:, 1]
     final_metrics = evaluate_predictions(y_test, final_probability, threshold=0.5)
@@ -557,20 +618,20 @@ def train_and_save(quick: bool = False) -> dict[str, Any]:
     ].iloc[0]
 
     threshold_table.to_csv(REPORTS_DIR / "threshold_analysis.csv", index=False)
-    validation_threshold_table.to_csv(
+    threshold_selection_table.to_csv(
         REPORTS_DIR / "threshold_selection_validation.csv",
         index=False,
     )
     pd.DataFrame(
         [
             {
-                "model": "Random Forest",
+                "model": model_name,
                 "evaluation_split": "final_test",
                 "decision_threshold": 0.5,
                 **final_metrics,
             },
             {
-                "model": "Random Forest",
+                "model": model_name,
                 "evaluation_split": "final_test",
                 "decision_threshold": business_threshold,
                 **business_metrics,
@@ -613,14 +674,17 @@ def train_and_save(quick: bool = False) -> dict[str, Any]:
     )
     split_sizes = {
         "train": len(X_train),
-        "validation": len(X_validation),
+        "selection": len(X_selection),
+        "calibration": len(X_calibration),
+        "threshold": len(X_threshold),
         "test": len(X_test),
     }
     write_business_report(
+        model_name,
         final_metrics,
         business_metrics,
         business_threshold,
-        grid_search,
+        selected_model_parameters,
         threshold_row,
         split_sizes,
     )
@@ -628,16 +692,18 @@ def train_and_save(quick: bool = False) -> dict[str, Any]:
     bundle = {
         "pipeline": explanation_pipeline,
         "predictor": calibrated_model,
+        "model_name": model_name,
         "threshold": business_threshold,
         "default_threshold_metrics": final_metrics,
         "business_threshold_metrics": business_metrics,
-        "best_params": grid_search.best_params_,
+        "best_params": selected_model_parameters,
+        "random_forest_best_params": grid_search.best_params_,
         "features": FEATURES,
         "numeric_features": NUMERIC_FEATURES,
         "categorical_features": CATEGORICAL_FEATURES,
         "target": TARGET,
-        "feature_reference": build_feature_reference(data),
-        "drift_reference": build_drift_reference(data),
+        "feature_reference": build_feature_reference(data.loc[X_train.index]),
+        "drift_reference": build_drift_reference(data.loc[X_train.index]),
         "permutation_importance": permutation,
         "calibration_analysis": calibration,
         "fairness_age_groups": fairness,
@@ -662,7 +728,10 @@ def train_and_save(quick: bool = False) -> dict[str, Any]:
         },
         "risk_bands": {
             "low": round(max(0.05, business_threshold * 0.5), 2),
-            "medium": business_threshold,
+            "medium": round(
+                min(0.90, max(business_threshold + 0.10, business_threshold * 2)),
+                2,
+            ),
         },
     }
 
@@ -671,11 +740,17 @@ def train_and_save(quick: bool = False) -> dict[str, Any]:
         json.dumps(
             {
                 "model_version": MODEL_VERSION,
+                "model_name": model_name,
                 "trained_at_utc": bundle["trained_at_utc"],
                 "model_sha256": file_sha256(MODEL_BUNDLE_PATH),
                 "data_sha256": bundle["data_sha256"],
                 "git_commit": bundle["git_commit"],
                 "git_dirty": bundle["git_dirty"],
+                "split_sizes": bundle["split_sizes"],
+                "cost_assumptions": bundle["cost_assumptions"],
+                "risk_bands": bundle["risk_bands"],
+                "best_params": bundle["best_params"],
+                "runtime_versions": bundle["runtime_versions"],
                 "features": FEATURES,
                 "excluded_lender_assigned_features": EXCLUDED_LENDER_ASSIGNED_FEATURES,
                 "excluded_policy_features": EXCLUDED_POLICY_FEATURES,
@@ -692,6 +767,7 @@ def train_and_save(quick: bool = False) -> dict[str, Any]:
         "default_metrics": final_metrics,
         "business_metrics": business_metrics,
         "business_threshold": business_threshold,
+        "model_name": model_name,
     }
 
 
@@ -702,14 +778,20 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Use a smaller hyperparameter grid for faster local iteration.",
     )
+    parser.add_argument(
+        "--require-clean",
+        action="store_true",
+        help="Fail when Git has uncommitted changes.",
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    output = train_and_save(quick=args.quick)
+    output = train_and_save(quick=args.quick, require_clean=args.require_clean)
     print(f"Saved model bundle: {output['model_path']}")
     print(f"Business threshold: {output['business_threshold']:.2f}")
+    print(f"Selected model: {output['model_name']}")
     print("Default-threshold metrics:")
     for metric, value in output["default_metrics"].items():
         print(f"  {metric}: {value:.3f}")

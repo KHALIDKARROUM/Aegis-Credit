@@ -4,63 +4,75 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Governed credit default risk decision-support dashboard.">
+    <meta name="description" content="Clear, human-centered loan application risk assessment.">
     <title>{% block title %}BankRisk Compass{% endblock %}</title>
     <link rel="stylesheet" href="{% static 'app/styles.css' %}">
     <script src="{% static 'app/app.js' %}" defer></script>
 </head>
 <body>
-    <a class="skip-link" href="#main-content">Skip to main content</a>
-    <div class="app-shell">
-        <aside class="sidebar">
-            <div class="sidebar-brand" aria-label="BankRisk Compass">
-                <div class="compass-logo" aria-hidden="true"><div class="compass-dot"></div></div>
-                <span>BankRisk</span>
-            </div>
-            <nav class="nav-stack" aria-label="Dashboard navigation">
-                {% for item in pages %}
-                    <a class="nav-link {% if item.key == active_page %}active{% endif %}" href="{% url item.url_name %}" {% if item.key == active_page %}aria-current="page"{% endif %}>
-                        <span class="nav-number">{{ item.number }}</span>
-                        <span>{{ item.label }}</span>
-                    </a>
-                {% endfor %}
-            </nav>
-            <div class="governance">
-                <span class="status-line"><span class="green-dot"></span> Decision-support model</span>
-                <small>Version {{ model_meta.version }} · trained {{ model_meta.trained_at }}</small>
-            </div>
-        </aside>
+    <a class="skip-link" href="#main-content">Skip to the assessment</a>
 
-        <main class="main-content" id="main-content">
-            <header class="page-header">
-                <div>
-                    <div class="brand-row">
-                        <h1 class="brand-title">BankRisk Compass</h1>
-                        <span class="model-badge"><span class="green-dot"></span>{{ best_model }}</span>
-                    </div>
-                    <div class="brand-subtitle">Application-time credit risk decision support</div>
-                </div>
-                <div class="header-actions">
-                    <div>{{ display_date }}</div>
-                    <div class="header-divider"></div>
-                    <div>Model v{{ model_meta.version }}</div>
-                </div>
-            </header>
+    <header class="topbar">
+        <a class="brand" href="{% url 'overview' %}" aria-label="BankRisk Compass home">
+            <span class="brand-mark" aria-hidden="true">
+                <span class="brand-needle"></span>
+            </span>
+            <span>
+                <strong>BankRisk Compass</strong>
+                <small>Loan application guidance</small>
+            </span>
+        </a>
 
-            {% if error_message %}
-                <section class="panel">
-                    <div class="card-title"><span class="title-icon">ER</span>Dashboard Unavailable</div>
-                    <p class="empty-state">{{ error_message }}</p>
-                </section>
+        <nav class="topnav" aria-label="Main navigation">
+            {% for item in pages %}
+                <a class="{% if item.key == active_page %}active{% endif %}" href="{% url item.url_name %}" {% if item.key == active_page %}aria-current="page"{% endif %}>
+                    {{ item.label }}
+                </a>
+            {% endfor %}
+        </nav>
+
+        <div class="account-actions">
+            {% if user.is_authenticated %}
+                <span>{{ user.get_username }}</span>
+                <form method="post" action="{% url 'logout' %}">
+                    {% csrf_token %}
+                    <button class="text-button" type="submit">Sign out</button>
+                </form>
             {% else %}
-                {% block content %}{% endblock %}
+                <div class="service-status">
+                    <span class="status-dot" aria-hidden="true"></span>
+                    Local workspace
+                </div>
             {% endif %}
+        </div>
+    </header>
 
-            <footer class="footer-row">
-                <div>Decision support only. Final credit decisions require human review and applicable compliance controls.</div>
-                <div>Artifact {{ model_meta.git_commit }}</div>
-            </footer>
-        </main>
-    </div>
+    <main class="main-content" id="main-content">
+        {% if messages %}
+            <div class="message-stack" aria-live="polite">
+                {% for message in messages %}
+                    <div class="form-alert {% if message.tags == 'error' %}error-alert{% else %}success-alert{% endif %}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+        {% if error_message %}
+            <section class="panel service-error" role="alert">
+                <span class="card-icon" aria-hidden="true">!</span>
+                <div>
+                    <h2>Assessment temporarily unavailable</h2>
+                    <p>Please try again in a few moments. If the issue continues, contact your support team.</p>
+                </div>
+            </section>
+        {% else %}
+            {% block content %}{% endblock %}
+        {% endif %}
+
+        <footer class="footer-row">
+            <p>This result supports a staff review. It does not approve or decline an application.</p>
+            <span>{{ display_date }}</span>
+        </footer>
+    </main>
 </body>
 </html>

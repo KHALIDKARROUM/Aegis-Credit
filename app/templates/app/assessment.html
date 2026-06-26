@@ -1,101 +1,149 @@
 {% extends "app/base.html" %}
 
-{% block title %}Loan Assessment · BankRisk Compass{% endblock %}
+{% block title %}New loan assessment · BankRisk Compass{% endblock %}
 
 {% block content %}
-<section class="page-intro">
+<section class="hero">
     <div>
-        <span class="eyebrow">Applicant assessment</span>
-        <h2>Screen an application with validated inputs</h2>
-        <p>The score uses information available at application time. Lender-assigned loan grade and pricing are intentionally excluded.</p>
+        <span class="eyebrow">Loan application review</span>
+        <h1>A clear recommendation, without the technical noise.</h1>
+        <p>Enter the applicant’s information to receive an easy-to-understand repayment-risk result and a suggested next step.</p>
     </div>
-    <div class="policy-chip">Human review required</div>
+    <div class="human-control">
+        <span aria-hidden="true">✓</span>
+        <div>
+            <strong>People stay in control</strong>
+            <small>A staff member makes the final decision.</small>
+        </div>
+    </div>
 </section>
+
+<div class="page-actions">
+    <a class="secondary-button" href="{% url 'overview' %}?demo=1">Load demo example</a>
+    <a class="text-button" href="{% url 'overview' %}">Clear form</a>
+</div>
 
 <section class="assessment-grid">
     <article class="panel form-panel">
-        <div class="card-title"><span class="title-icon">AP</span>Applicant profile</div>
-        <p class="section-copy">All fields are required. Values are checked for internal consistency before a score is produced.</p>
+        <div class="card-heading">
+            <span class="card-icon" aria-hidden="true">1</span>
+            <div>
+                <h2>Applicant details</h2>
+                <p>Complete every field using the information supplied in the application.</p>
+            </div>
+        </div>
 
         <form class="assessment-form" method="post" novalidate data-loading-form>
             {% csrf_token %}
+            {{ assessment_form.request_id }}
 
             {% if assessment_form.non_field_errors %}
                 <div class="form-alert error-alert" role="alert">
-                    <strong>Please review the application.</strong>
+                    <strong>Please check the application details.</strong>
                     {{ assessment_form.non_field_errors }}
                 </div>
             {% endif %}
 
             <div class="form-grid">
                 {% for field in assessment_form %}
-                    <div class="field-group {% if field.errors %}has-error{% endif %}">
-                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                        {{ field }}
-                        {% if field.name == "person_income" or field.name == "loan_amnt" %}
-                            <span class="field-hint">Enter a whole annual amount in USD.</span>
-                        {% elif field.name == "person_emp_length" or field.name == "cb_person_cred_hist_length" %}
-                            <span class="field-hint">Enter years.</span>
-                        {% endif %}
-                        {% for error in field.errors %}
-                            <span class="field-error" role="alert">{{ error }}</span>
-                        {% endfor %}
-                    </div>
+                    {% if not field.is_hidden %}
+                        <div class="field-group {% if field.name == 'applicant_reference' %}wide-field{% endif %} {% if field.errors %}has-error{% endif %}">
+                            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                            {{ field }}
+                            {% if field.name == "applicant_reference" %}
+                                <span class="field-hint">Use a case number, not an applicant name or government identifier.</span>
+                            {% elif field.name == "person_income" %}
+                                <span class="field-hint">Gross yearly income in USD.</span>
+                            {% elif field.name == "loan_amnt" %}
+                                <span class="field-hint">Total amount requested in USD.</span>
+                            {% elif field.name == "person_emp_length" %}
+                                <span class="field-hint">Use 0 if the applicant has less than one year.</span>
+                            {% elif field.name == "cb_person_cred_hist_length" %}
+                                <span class="field-hint">Number of years since the first credit account.</span>
+                            {% endif %}
+                            {% for error in field.errors %}
+                                <span class="field-error" role="alert">{{ error }}</span>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
                 {% endfor %}
             </div>
+
             <button class="primary-button" type="submit">
-                <span class="button-label">Assess default risk</span>
-                <span class="button-loading" aria-hidden="true">Calculating…</span>
+                <span class="button-label">Show assessment</span>
+                <span class="button-loading" aria-hidden="true">Preparing result…</span>
             </button>
+            <p class="form-privacy">Validated details are retained in the case record under the configured retention policy.</p>
         </form>
     </article>
 
     <article class="panel result-panel" aria-live="polite">
-        <div class="card-title"><span class="title-icon">RP</span>Risk result</div>
+        <div class="card-heading">
+            <span class="card-icon" aria-hidden="true">2</span>
+            <div>
+                <h2>Assessment result</h2>
+                <p>Your recommendation will appear here.</p>
+            </div>
+        </div>
+
         {% if has_result %}
-            <div class="risk-main">
-                <div class="gauge" style="{{ gauge_style }}" role="img" aria-label="Estimated default probability {{ probability_percent }}">
-                    <div class="gauge-inner">
-                        <div>
-                            <div class="gauge-label">Estimated default<br>probability</div>
-                            <div class="gauge-value" style="color: {{ category_color }}">{{ probability_percent }}</div>
+            <div class="recommendation-card {{ category_class }}">
+                <span class="recommendation-kicker">Recommended next step</span>
+                <h3>{{ decision }}</h3>
+                <p>{{ decision_detail }}</p>
+                {% if saved_case %}
+                    <a class="inline-link" href="{% url 'case-detail' saved_case.id %}">
+                        Open saved case {{ saved_case.id|stringformat:"s"|slice:":8" }}
+                    </a>
+                {% endif %}
+            </div>
+
+            <div class="result-details">
+                <div class="risk-visual">
+                    <div class="gauge" style="{{ gauge_style }}" role="img" aria-label="Estimated repayment risk {{ probability_percent }}">
+                        <div class="gauge-inner">
+                            <span>Estimated<br>repayment risk</span>
+                            <strong style="color: {{ category_color }}">{{ probability_percent }}</strong>
                         </div>
                     </div>
+                    <p>{{ probability_context }}</p>
                 </div>
-                <div class="prediction-summary">
-                    <span class="prediction-label">Risk band</span>
-                    <div class="risk-pill {{ category_class }}">{{ category }}</div>
-                    <span class="prediction-label">Screening result</span>
-                    <div class="prediction-value {{ category_class }}">{{ prediction }}</div>
-                    <div class="divider"></div>
-                    <span class="prediction-label">Recommended next step</span>
-                    <div class="prediction-value action-value {{ category_class }}">{{ decision }}</div>
+
+                <div class="result-summary">
+                    <span class="summary-label">Overall risk level</span>
+                    <div class="risk-pill {{ category_class }}">{{ category_display }}</div>
+
+                    <span class="summary-label">Plain-language result</span>
+                    <strong class="plain-result">{{ prediction }}</strong>
+
+                    <div class="plain-note">
+                        This is an early screening result. Continue with identity, affordability, policy, and compliance checks.
+                    </div>
                 </div>
             </div>
 
             {% if distribution_warnings %}
                 <div class="form-alert warning-alert" role="status">
-                    <strong>Review for unusual values</strong>
+                    <strong>Please verify unusual information</strong>
                     <ul>
                         {% for warning in distribution_warnings %}<li>{{ warning }}</li>{% endfor %}
                     </ul>
                 </div>
             {% endif %}
-
-            <div class="threshold-box">
-                <strong>Policy threshold {{ threshold|floatformat:2 }}</strong>
-                <span>Selected on validation data using a 5:1 false-negative to false-positive cost assumption.</span>
-            </div>
-            <p class="decision-note">This result supports review; it is not an approval, decline, or adverse-action notice.</p>
         {% else %}
             <div class="empty-result">
-                <div class="empty-result-icon" aria-hidden="true">↗</div>
-                <h3>Ready when the application is</h3>
-                <p>Complete the validated profile and select “Assess default risk.” No prediction is generated before submission.</p>
-                <div class="empty-result-steps">
-                    <span><strong>1</strong> Validate inputs</span>
-                    <span><strong>2</strong> Estimate risk</span>
-                    <span><strong>3</strong> Review factors</span>
+                <div class="empty-illustration" aria-hidden="true">
+                    <span class="empty-check">✓</span>
+                    <span class="empty-line line-one"></span>
+                    <span class="empty-line line-two"></span>
+                    <span class="empty-line line-three"></span>
+                </div>
+                <h3>Ready for an application</h3>
+                <p>Complete the applicant details and select “Show assessment” to receive a result.</p>
+                <div class="empty-steps">
+                    <span><strong>1</strong> Enter details</span>
+                    <span><strong>2</strong> View result</span>
+                    <span><strong>3</strong> Review next step</span>
                 </div>
             </div>
         {% endif %}
@@ -103,34 +151,42 @@
 </section>
 
 {% if has_result %}
-<section class="panel">
-    <div class="card-title"><span class="title-icon">EX</span>Factors influencing this score</div>
-    <p class="explanation-method">{{ explanation_method }}</p>
+<section class="panel explanation-panel">
+    <div class="card-heading">
+        <span class="card-icon" aria-hidden="true">3</span>
+        <div>
+            <h2>What most influenced this result</h2>
+            <p>{{ explanation_method }}</p>
+        </div>
+    </div>
+
     <div class="explanation-grid">
         {% for row in explanation_rows %}
             <article class="explanation-item {{ row.class }}">
+                <span class="impact-marker" aria-hidden="true"></span>
                 <div>
                     <strong>{{ row.factor }}</strong>
                     <p>{{ row.detail }}</p>
                 </div>
-                <span>{{ row.impact }}</span>
+                <span class="impact-label">{{ row.impact }}</span>
             </article>
         {% endfor %}
     </div>
+    <p class="explanation-disclaimer">{{ explanation_disclaimer }}</p>
 </section>
 
-<section class="panel">
-    <div class="card-title"><span class="title-icon">BL</span>Validated application snapshot</div>
-    <div class="table-wrap">
-        <table class="data-table">
-            <thead><tr><th>Feature</th><th>Applicant value</th></tr></thead>
-            <tbody>
-                {% for row in snapshot %}
-                    <tr><td>{{ row.feature }}</td><td>{{ row.value }}</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
+<details class="panel application-details">
+    <summary>View the application details used</summary>
+    <div class="detail-content">
+        <div class="snapshot-grid">
+            {% for row in snapshot %}
+                <div>
+                    <span>{{ row.feature }}</span>
+                    <strong>{{ row.value }}</strong>
+                </div>
+            {% endfor %}
+        </div>
     </div>
-</section>
+</details>
 {% endif %}
 {% endblock %}

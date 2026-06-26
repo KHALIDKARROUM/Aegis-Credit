@@ -1,0 +1,33 @@
+services:
+  database:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: bankrisk
+      POSTGRES_USER: bankrisk
+      POSTGRES_PASSWORD: bankrisk
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bankrisk -d bankrisk"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - bankrisk_postgres:/var/lib/postgresql/data
+
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DEBUG: "False"
+      SECRET_KEY: "local-docker-secret-change-before-sharing"
+      AUDIT_HMAC_KEY: "local-docker-audit-key-change-before-sharing"
+      DATABASE_URL: "postgresql://bankrisk:bankrisk@database:5432/bankrisk"
+      DB_SSL_REQUIRE: "False"
+      ALLOWED_HOSTS: "127.0.0.1,localhost"
+      LOGIN_REQUIRED: "False"
+    depends_on:
+      database:
+        condition: service_healthy
+
+volumes:
+  bankrisk_postgres:

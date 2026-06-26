@@ -54,9 +54,12 @@ if errorlevel 1 goto :install_failed
 set "DEBUG=True"
 set "SECURE_SSL_REDIRECT=False"
 set "ALLOWED_HOSTS=127.0.0.1,localhost"
+set "LOGIN_REQUIRED=False"
 
 echo Preparing the local audit database...
 "%VENV_PYTHON%" manage.py migrate --no-input
+if errorlevel 1 goto :setup_failed
+"%VENV_PYTHON%" manage.py bootstrap_roles
 if errorlevel 1 goto :setup_failed
 
 echo.

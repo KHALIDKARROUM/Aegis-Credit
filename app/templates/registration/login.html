@@ -1,0 +1,26 @@
+{% extends "app/base.html" %}
+
+{% block title %}Sign in · BankRisk Compass{% endblock %}
+
+{% block content %}
+<section class="auth-shell">
+    <article class="panel auth-card">
+        <span class="eyebrow">Controlled access</span>
+        <h1>Sign in</h1>
+        <p>Use your assigned analyst, reviewer, or administrator account.</p>
+        <form method="post" class="assessment-form">
+            {% csrf_token %}
+            {% if form.non_field_errors %}<div class="form-alert error-alert">{{ form.non_field_errors }}</div>{% endif %}
+            {% for field in form %}
+                <div class="field-group">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% for error in field.errors %}<span class="field-error">{{ error }}</span>{% endfor %}
+                </div>
+            {% endfor %}
+            <input type="hidden" name="next" value="{{ next }}">
+            <button class="primary-button" type="submit">Sign in</button>
+        </form>
+    </article>
+</section>
+{% endblock %}

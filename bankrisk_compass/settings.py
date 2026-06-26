@@ -37,15 +37,23 @@ if render_hostname:
     CSRF_TRUSTED_ORIGINS.append(f"https://{render_hostname}")
 
 INSTALLED_APPS = [
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
     "django.contrib.staticfiles",
-    "app",
+    "app.apps.RiskDashboardConfig",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
@@ -60,6 +68,8 @@ TEMPLATES = [
             "context_processors": [
                 "django.template.context_processors.request",
                 "django.template.context_processors.static",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
             ],
         },
     },
@@ -74,6 +84,16 @@ DATABASES = {
         "OPTIONS": {"timeout": 20},
     }
 }
+database_url = os.getenv("DATABASE_URL")
+if database_url:
+    import dj_database_url
+
+    DATABASES["default"] = dj_database_url.parse(
+        database_url,
+        conn_max_age=int(os.getenv("DB_CONN_MAX_AGE", "600")),
+        conn_health_checks=True,
+        ssl_require=env_bool("DB_SSL_REQUIRE", not DEBUG),
+    )
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
@@ -106,6 +126,33 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 X_FRAME_OPTIONS = "DENY"
 SCORING_API_KEY = os.getenv("SCORING_API_KEY", "")
+AUDIT_HMAC_KEY = os.getenv("AUDIT_HMAC_KEY", SECRET_KEY)
+LOGIN_REQUIRED = env_bool("LOGIN_REQUIRED", not DEBUG)
+CASE_RETENTION_DAYS = int(os.getenv("CASE_RETENTION_DAYS", "365"))
+MAX_BATCH_ROWS = int(os.getenv("MAX_BATCH_ROWS", "1000"))
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
+API_RATE_LIMIT_PER_MINUTE = int(os.getenv("API_RATE_LIMIT_PER_MINUTE", "60"))
+
+LOGIN_URL = "login"
+LOGIN_REDIRECT_URL = "overview"
+LOGOUT_REDIRECT_URL = "login"
+
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
+
+CACHES = {
+    "default": {
+        "BACKEND": os.getenv(
+            "CACHE_BACKEND",
+            "django.core.cache.backends.locmem.LocMemCache",
+        ),
+        "LOCATION": os.getenv("CACHE_LOCATION", "bankrisk-compass"),
+    }
+}
 
 LOGGING = {
     "version": 1,

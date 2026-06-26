@@ -4,8 +4,10 @@ import html
 import io
 import csv
 import hashlib
+import hmac
 import json
 import logging
+import uuid
 from hmac import compare_digest
 from datetime import date
 from functools import lru_cache
@@ -15,6 +17,8 @@ from typing import Any
 import joblib
 import numpy as np
 import pandas as pd
+from django.conf import settings
+from django.core.cache import cache
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.figure import Figure
 
@@ -148,8 +152,16 @@ def model_metadata(bundle: dict[str, Any]) -> dict[str, str]:
 
 
 def risk_category(probability: float, bundle: dict[str, Any]) -> tuple[str, str, str]:
-    low_cutoff = bundle.get("risk_bands", {}).get("low", 0.25)
-    medium_cutoff = bundle.get("risk_bands", {}).get("medium", 0.50)
+    threshold = float(bundle.get("threshold", 0.5))
+    configured = bundle.get("risk_bands", {})
+    low_cutoff = float(configured.get("low", max(0.05, threshold * 0.5)))
+    medium_cutoff = float(configured.get("medium", max(threshold + 0.10, threshold * 2)))
+
+    # Bundles produced before v2.1 used the decision threshold as the high-risk
+    # cutoff, which made the ordinary manual-review branch unreachable.
+    if medium_cutoff <= threshold:
+        medium_cutoff = min(0.90, max(threshold + 0.10, threshold * 2))
+    low_cutoff = min(low_cutoff, threshold)
 
     if probability < low_cutoff:
         return "Low", "low", "#07856a"
@@ -179,15 +191,15 @@ def pretty_feature_name(feature: str) -> str:
     labels = {
         "loan_grade": "Loan Grade",
         "loan_int_rate": "Interest Rate",
-        "loan_percent_income": "Loan % of Income",
-        "person_income": "Income",
-        "loan_amnt": "Loan Amount",
-        "person_home_ownership": "Home Ownership",
-        "loan_intent": "Loan Intent",
-        "cb_person_default_on_file": "Prior Default",
-        "person_emp_length": "Employment Length",
+        "loan_percent_income": "Loan compared with income",
+        "person_income": "Annual income",
+        "loan_amnt": "Requested loan",
+        "person_home_ownership": "Housing situation",
+        "loan_intent": "Loan purpose",
+        "cb_person_default_on_file": "Previous default",
+        "person_emp_length": "Years employed",
         "person_age": "Age",
-        "cb_person_cred_hist_length": "Credit History",
+        "cb_person_cred_hist_length": "Years of credit history",
     }
     return labels.get(feature, feature.replace("_", " ").title())
 
@@ -460,11 +472,30 @@ def assessment_result(
     probability = predict_default_probability(bundle, application)
     category, category_class, category_color = risk_category(probability, bundle)
     threshold = float(bundle.get("threshold", 0.5))
-    prediction = "Likely Default" if probability >= threshold else "Likely Non-default"
+    category_display = {
+        "Low": "Lower risk",
+        "Medium": "Moderate risk",
+        "High": "Higher risk",
+    }[category]
     if probability >= threshold:
-        decision = "Manual review required" if category != "High" else "Enhanced manual review required"
+        prediction = "This application needs a closer look"
+        if category == "High":
+            decision = "Refer for enhanced review"
+            decision_detail = (
+                "The application shows a higher chance of repayment difficulty. "
+                "A senior reviewer should check affordability and credit history before proceeding."
+            )
+        else:
+            decision = "Refer for manual review"
+            decision_detail = (
+                "Some application details need a person to review them before the application moves forward."
+            )
     else:
-        decision = "Proceed to standard underwriting"
+        prediction = "No elevated repayment concern identified"
+        decision = "Continue with standard review"
+        decision_detail = (
+            "The application can continue through the normal review process, subject to the bank's usual checks."
+        )
 
     snapshot = []
     display_features = ["person_age", *bundle["features"]]
@@ -481,7 +512,7 @@ def assessment_result(
         snapshot.append({"feature": pretty_feature_name(feature), "value": display_value})
 
     if explain:
-        explanation_rows, explanation_method = applicant_explanations(
+        explanation_rows, explanation_method, explanation_kind = applicant_explanations(
             bundle,
             application,
             form,
@@ -489,22 +520,37 @@ def assessment_result(
     else:
         explanation_rows = []
         explanation_method = "Explanation omitted for low-latency API scoring."
+        explanation_kind = "omitted"
 
     return {
         "form": form,
         "application": application,
+        "request_id": form.get("request_id") or uuid.uuid4(),
+        "applicant_reference": str(form.get("applicant_reference") or "").strip(),
         "probability": probability,
         "probability_percent": f"{probability:.0%}",
         "gauge_style": f"--score:{probability * 100:.1f}%;--color:{category_color};",
         "category": category,
+        "category_display": category_display,
         "category_class": category_class,
         "category_color": category_color,
         "prediction": prediction,
         "decision": decision,
+        "decision_detail": decision_detail,
+        "probability_context": (
+            f"About {round(probability * 100)} out of 100 similar past applications "
+            "experienced repayment difficulty."
+        ),
         "threshold": threshold,
         "snapshot": snapshot,
         "explanation_rows": explanation_rows,
         "explanation_method": explanation_method,
+        "explanation_kind": explanation_kind,
+        "explanation_disclaimer": (
+            "These factors describe model behavior and are not approved adverse-action reasons."
+            if explanation_kind == "model"
+            else "These are general review checks, not model-derived or adverse-action reasons."
+        ),
     }
 
 
@@ -515,7 +561,236 @@ def feature_digest(application: pd.DataFrame) -> str:
         default=str,
         separators=(",", ":"),
     )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return hmac.new(
+        settings.AUDIT_HMAC_KEY.encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def json_safe_application(result: dict[str, Any]) -> dict[str, Any]:
+    values = dict(result["form"])
+    allowed = {"person_age", *result["application"].columns.tolist()}
+    output: dict[str, Any] = {}
+    for key in allowed:
+        value = values.get(key)
+        if isinstance(value, np.integer):
+            value = int(value)
+        elif isinstance(value, np.floating):
+            value = float(value)
+        output[key] = value
+    return output
+
+
+def api_rate_limit_exceeded(identifier: str) -> bool:
+    limit = settings.API_RATE_LIMIT_PER_MINUTE
+    if limit <= 0:
+        return False
+    bucket = int(__import__("time").time() // 60)
+    key = f"score-rate:{hashlib.sha256(identifier.encode('utf-8')).hexdigest()}:{bucket}"
+    try:
+        current = cache.incr(key)
+    except ValueError:
+        cache.set(key, 1, timeout=70)
+        current = 1
+    return current > limit
+
+
+def read_batch_upload(upload: Any) -> pd.DataFrame:
+    suffix = Path(upload.name).suffix.lower()
+    if suffix == ".csv":
+        frame = pd.read_csv(upload)
+    elif suffix == ".xlsx":
+        frame = pd.read_excel(upload, engine="openpyxl")
+    else:
+        raise ValueError("Unsupported file type.")
+
+    frame.columns = [str(column).strip() for column in frame.columns]
+    if len(frame) > settings.MAX_BATCH_ROWS:
+        raise ValueError(
+            f"The file contains {len(frame):,} rows; the current limit is "
+            f"{settings.MAX_BATCH_ROWS:,}."
+        )
+    return frame
+
+
+def batch_template_csv() -> str:
+    columns = [
+        "applicant_reference",
+        "person_age",
+        "person_income",
+        "person_emp_length",
+        "person_home_ownership",
+        "loan_amnt",
+        "loan_intent",
+        "cb_person_cred_hist_length",
+        "cb_person_default_on_file",
+    ]
+    example = ["APP-001", 30, 65000, 5, "RENT", 8000, "PERSONAL", 6, "N"]
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(columns)
+    writer.writerow(example)
+    return buffer.getvalue()
+
+
+def batch_results_csv(results: list[dict[str, Any]]) -> str:
+    columns = [
+        "row",
+        "applicant_reference",
+        "status",
+        "case_id",
+        "probability",
+        "risk_category",
+        "recommended_next_step",
+        "warnings",
+        "errors",
+    ]
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=columns)
+    writer.writeheader()
+    for row in results:
+        writer.writerow(
+            {
+                **{column: row.get(column, "") for column in columns},
+                "warnings": " | ".join(row.get("warnings", [])),
+                "errors": " | ".join(row.get("errors", [])),
+            }
+        )
+    return buffer.getvalue()
+
+
+def business_economics(
+    threshold_table: pd.DataFrame,
+    *,
+    average_exposure: float,
+    loss_given_default: float,
+    annual_margin: float,
+    review_cost: float,
+) -> dict[str, Any]:
+    if threshold_table.empty:
+        return {"table": pd.DataFrame(), "recommended": {}, "assumptions": {}}
+
+    working = threshold_table.copy()
+    working["flagged_applications"] = working["false_positives"] + working["true_positives"]
+    population = (
+        working["true_negatives"]
+        + working["false_positives"]
+        + working["false_negatives"]
+        + working["true_positives"]
+    )
+    working["review_rate"] = working["flagged_applications"] / population
+    working["missed_default_loss"] = (
+        working["false_negatives"] * average_exposure * loss_given_default
+    )
+    working["manual_review_cost"] = working["flagged_applications"] * review_cost
+    working["false_positive_opportunity_cost"] = (
+        working["false_positives"] * average_exposure * annual_margin
+    )
+    working["estimated_total_cost"] = (
+        working["missed_default_loss"]
+        + working["manual_review_cost"]
+        + working["false_positive_opportunity_cost"]
+    )
+    recommended = (
+        working.sort_values(
+            ["estimated_total_cost", "recall", "precision"],
+            ascending=[True, False, False],
+        )
+        .iloc[0]
+        .to_dict()
+    )
+    return {
+        "table": working,
+        "recommended": recommended,
+        "assumptions": {
+            "average_exposure": average_exposure,
+            "loss_given_default": loss_given_default,
+            "annual_margin": annual_margin,
+            "review_cost": review_cost,
+        },
+    }
+
+
+def openapi_schema() -> dict[str, Any]:
+    properties = {
+        "applicant_reference": {"type": "string", "maxLength": 80},
+        "person_age": {"type": "integer", "minimum": 18, "maximum": 100},
+        "person_income": {"type": "integer", "minimum": 1},
+        "person_emp_length": {"type": "number", "minimum": 0},
+        "person_home_ownership": {
+            "type": "string",
+            "enum": ["MORTGAGE", "OTHER", "OWN", "RENT"],
+        },
+        "loan_amnt": {"type": "integer", "minimum": 500},
+        "loan_intent": {
+            "type": "string",
+            "enum": [
+                "DEBTCONSOLIDATION",
+                "EDUCATION",
+                "HOMEIMPROVEMENT",
+                "MEDICAL",
+                "PERSONAL",
+                "VENTURE",
+            ],
+        },
+        "cb_person_cred_hist_length": {"type": "integer", "minimum": 0},
+        "cb_person_default_on_file": {"type": "string", "enum": ["N", "Y"]},
+    }
+    return {
+        "openapi": "3.1.0",
+        "info": {
+            "title": "BankRisk Compass Scoring API",
+            "version": "1.0.0",
+            "description": (
+                "Versioned screening API. It supports human review and does not "
+                "approve, decline, or generate adverse-action reasons."
+            ),
+        },
+        "paths": {
+            "/api/v1/score/": {
+                "post": {
+                    "summary": "Score one validated application",
+                    "security": [{"ApiKeyAuth": []}, {"BearerAuth": []}],
+                    "parameters": [
+                        {
+                            "name": "Idempotency-Key",
+                            "in": "header",
+                            "required": False,
+                            "schema": {"type": "string", "format": "uuid"},
+                        }
+                    ],
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": [
+                                        key for key in properties if key != "applicant_reference"
+                                    ],
+                                    "properties": properties,
+                                }
+                            }
+                        },
+                    },
+                    "responses": {
+                        "200": {"description": "Versioned screening result"},
+                        "400": {"description": "Validation error"},
+                        "401": {"description": "Invalid API key"},
+                        "429": {"description": "Rate limit exceeded"},
+                        "503": {"description": "API or model unavailable"},
+                    },
+                }
+            }
+        },
+        "components": {
+            "securitySchemes": {
+                "ApiKeyAuth": {"type": "apiKey", "in": "header", "name": "X-API-Key"},
+                "BearerAuth": {"type": "http", "scheme": "bearer"},
+            }
+        },
+    }
 
 
 @lru_cache(maxsize=2)
@@ -593,15 +868,14 @@ def shap_applicant_explanations(
     rows = []
     for feature, contribution in ranked:
         raises_risk = contribution > 0
-        direction = "toward default" if raises_risk else "toward non-default"
         rows.append(
             {
                 "factor": pretty_feature_name(feature),
                 "detail": (
                     f"Applicant value: {_feature_value_text(feature, applicant[feature])}. "
-                    f"SHAP impact {contribution:+.3f}, moving the model {direction}."
+                    f"This detail {'increased' if raises_risk else 'reduced'} the estimated repayment risk."
                 ),
-                "impact": "Raises model risk" if raises_risk else "Lowers model risk",
+                "impact": "Increases risk" if raises_risk else "Reduces risk",
                 "class": "negative" if raises_risk else "positive",
             }
         )
@@ -612,35 +886,37 @@ def applicant_explanations(
     bundle: dict[str, Any],
     application: pd.DataFrame,
     form: dict[str, Any],
-) -> tuple[list[dict[str, str]], str]:
+) -> tuple[list[dict[str, str]], str, str]:
     try:
         rows = shap_applicant_explanations(bundle, application)
         if rows:
             return (
                 rows,
-                "Tree SHAP ranks the five applicant fields with the largest local impact on this prediction.",
+                "These fields had the greatest influence on the underlying model score.",
+                "model",
             )
     except Exception as exc:
         LOGGER.exception("Falling back to policy-based applicant explanations: %s", exc)
 
     return (
         policy_applicant_explanations(form),
-        "Model explanation is temporarily unavailable; these fallback indicators use transparent lending-risk rules.",
+        "The model explanation is unavailable. These are separate, transparent review checks.",
+        "fallback",
     )
 
 
 def policy_applicant_explanations(form: dict[str, Any]) -> list[dict[str, str]]:
     loan_percent_income = float(form["loan_percent_income"])
-    loan_grade = str(form["loan_grade"])
     prior_default = str(form["cb_person_default_on_file"])
     income = float(form["person_income"])
-    interest_rate = float(form["loan_int_rate"])
+    employment = float(form["person_emp_length"])
+    credit_history = float(form["cb_person_cred_hist_length"])
 
     rows = []
     if loan_percent_income < 0.20:
         rows.append(
             {
-                "factor": "Loan % of income",
+                "factor": "Loan compared with income",
                 "detail": f"{format_percent(loan_percent_income)} is low for the requested loan.",
                 "impact": "Reduces risk",
                 "class": "positive",
@@ -649,7 +925,7 @@ def policy_applicant_explanations(form: dict[str, Any]) -> list[dict[str, str]]:
     elif loan_percent_income <= 0.35:
         rows.append(
             {
-                "factor": "Loan % of income",
+                "factor": "Loan compared with income",
                 "detail": f"{format_percent(loan_percent_income)} is moderate.",
                 "impact": "Neutral to moderate risk",
                 "class": "neutral",
@@ -658,36 +934,8 @@ def policy_applicant_explanations(form: dict[str, Any]) -> list[dict[str, str]]:
     else:
         rows.append(
             {
-                "factor": "Loan % of income",
+                "factor": "Loan compared with income",
                 "detail": f"{format_percent(loan_percent_income)} is high.",
-                "impact": "Increases risk",
-                "class": "negative",
-            }
-        )
-
-    if loan_grade in {"A", "B"}:
-        rows.append(
-            {
-                "factor": "Loan grade",
-                "detail": f"Grade {loan_grade} is a stronger credit tier in this dataset.",
-                "impact": "Reduces risk",
-                "class": "positive",
-            }
-        )
-    elif loan_grade in {"C"}:
-        rows.append(
-            {
-                "factor": "Loan grade",
-                "detail": f"Grade {loan_grade} is a middle credit tier.",
-                "impact": "Moderate risk",
-                "class": "neutral",
-            }
-        )
-    else:
-        rows.append(
-            {
-                "factor": "Loan grade",
-                "detail": f"Grade {loan_grade} is associated with higher observed default risk.",
                 "impact": "Increases risk",
                 "class": "negative",
             }
@@ -695,8 +943,8 @@ def policy_applicant_explanations(form: dict[str, Any]) -> list[dict[str, str]]:
 
     rows.append(
         {
-            "factor": "Prior default",
-            "detail": "No prior default is on file." if prior_default == "N" else "A prior default is on file.",
+            "factor": "Previous default",
+            "detail": "No previous default is recorded." if prior_default == "N" else "A previous default is recorded.",
             "impact": "Reduces risk" if prior_default == "N" else "Increases risk",
             "class": "positive" if prior_default == "N" else "negative",
         }
@@ -705,7 +953,7 @@ def policy_applicant_explanations(form: dict[str, Any]) -> list[dict[str, str]]:
     if income >= 50_000:
         rows.append(
             {
-                "factor": "Income",
+                "factor": "Annual income",
                 "detail": f"{format_money(income)} suggests a more stable repayment profile.",
                 "impact": "Reduces risk",
                 "class": "positive",
@@ -714,25 +962,40 @@ def policy_applicant_explanations(form: dict[str, Any]) -> list[dict[str, str]]:
     else:
         rows.append(
             {
-                "factor": "Income",
+                "factor": "Annual income",
                 "detail": f"{format_money(income)} leaves less repayment cushion.",
                 "impact": "Increases risk",
                 "class": "negative",
             }
         )
 
-    if interest_rate <= 10:
-        impact = ("Lower interest rate", "Reduces risk", "positive")
-    elif interest_rate <= 15:
-        impact = ("Moderate interest rate", "Neutral to moderate risk", "neutral")
+    if employment >= 5:
+        employment_impact = ("suggests employment stability.", "Reduces risk", "positive")
+    elif employment >= 2:
+        employment_impact = ("shows some employment stability.", "Moderate risk", "neutral")
     else:
-        impact = ("Higher interest rate", "Increases risk", "negative")
+        employment_impact = ("provides a shorter employment record.", "Increases risk", "negative")
     rows.append(
         {
-            "factor": "Interest rate",
-            "detail": f"{interest_rate:.2f}% is a {impact[0].lower()}.",
-            "impact": impact[1],
-            "class": impact[2],
+            "factor": "Years employed",
+            "detail": f"{employment:g} years {employment_impact[0]}",
+            "impact": employment_impact[1],
+            "class": employment_impact[2],
+        }
+    )
+
+    if credit_history >= 5:
+        history_impact = ("provides a longer repayment record.", "Reduces risk", "positive")
+    elif credit_history >= 2:
+        history_impact = ("provides a developing repayment record.", "Moderate risk", "neutral")
+    else:
+        history_impact = ("provides limited repayment history.", "Increases risk", "negative")
+    rows.append(
+        {
+            "factor": "Years of credit history",
+            "detail": f"{credit_history:g} years {history_impact[0]}",
+            "impact": history_impact[1],
+            "class": history_impact[2],
         }
     )
     return rows

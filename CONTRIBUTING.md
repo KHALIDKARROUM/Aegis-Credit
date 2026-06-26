@@ -8,6 +8,8 @@
 6. Run `python -m compileall -q app bankrisk_compass src`.
 7. If model behavior changes, regenerate artifacts with
    `python -m src.train_model --quick` and update the model/data cards.
+8. If database models change, commit the generated migration and test both a
+   fresh database and an upgrade from the previous migration.
 
 Do not commit raw applicant data, local databases, `.env` files, or credentials.
 Changes to features, thresholds, costs, or decision language require explicit

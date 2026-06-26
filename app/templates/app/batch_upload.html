@@ -1,0 +1,71 @@
+{% extends "app/base.html" %}
+
+{% block title %}Batch applicant load · BankRisk Compass{% endblock %}
+
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">Bulk workflow</span>
+        <h1>Load applicant files</h1>
+        <p>Validate and score up to the configured row limit from CSV or Excel.</p>
+    </div>
+    <a class="secondary-button" href="{% url 'batch-template' %}">Download template</a>
+</section>
+
+<section class="dashboard-grid split-wide">
+    <article class="panel data-panel">
+        <div class="card-heading"><div><h2>Upload file</h2><p>Rows with errors are isolated and never scored.</p></div></div>
+        <form method="post" enctype="multipart/form-data" class="assessment-form" data-loading-form>
+            {% csrf_token %}
+            {% for field in batch_form %}
+                <div class="field-group">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    <span class="field-hint">{{ field.help_text }}</span>
+                    {% for error in field.errors %}<span class="field-error">{{ error }}</span>{% endfor %}
+                </div>
+            {% endfor %}
+            <button class="primary-button" type="submit">
+                <span class="button-label">Validate and score</span>
+                <span class="button-loading">Processing…</span>
+            </button>
+        </form>
+    </article>
+    <article class="panel data-panel">
+        <div class="card-heading"><div><h2>Required columns</h2><p>Exact machine-readable column names.</p></div></div>
+        <code class="column-contract">person_age
+person_income
+person_emp_length
+person_home_ownership
+loan_amnt
+loan_intent
+cb_person_cred_hist_length
+cb_person_default_on_file</code>
+        <p><code>applicant_reference</code> is optional. Do not upload names, account numbers, or government identifiers.</p>
+    </article>
+</section>
+
+<section class="panel data-panel">
+    <div class="card-heading"><div><h2>Recent batches</h2></div></div>
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead><tr><th>Created</th><th>File</th><th>Status</th><th>Rows</th><th>Valid</th><th>Invalid</th><th></th></tr></thead>
+            <tbody>
+                {% for batch in recent_batches %}
+                    <tr>
+                        <td>{{ batch.created_at|date:"Y-m-d H:i" }}</td>
+                        <td>{{ batch.file_name }}</td>
+                        <td>{{ batch.get_status_display }}</td>
+                        <td>{{ batch.total_rows }}</td>
+                        <td>{{ batch.valid_rows }}</td>
+                        <td>{{ batch.invalid_rows }}</td>
+                        <td><a class="inline-link" href="{% url 'batch-detail' batch.id %}">Open</a></td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="7">No files have been processed yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

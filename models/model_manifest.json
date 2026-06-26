@@ -1,10 +1,38 @@
 {
-  "model_version": "2.0.0",
-  "trained_at_utc": "2026-06-25T17:30:41.978296+00:00",
-  "model_sha256": "4c6743847104126b8f4a88dc2ac4db49c8c4a8f2163313fc5bafbe5121c196c0",
+  "model_version": "2.1.0",
+  "model_name": "Gradient Boosting",
+  "trained_at_utc": "2026-06-26T00:21:20.321194+00:00",
+  "model_sha256": "13c827ac4f4dd08689b45e848cc0a4e20752dd4e32782d616d203bf001d2edfe",
   "data_sha256": "f56c566de00c25e0979a402afc57442fd20e1f4763cf16afc818bf35040df9ef",
-  "git_commit": "ef19b9625f095e9b7341cdb7bf3c40936c83fe1c",
+  "git_commit": "cea012424f8a236b766f630321fdbb1e633e9768",
   "git_dirty": true,
+  "split_sizes": {
+    "train": 19449,
+    "selection": 2593,
+    "calibration": 1945,
+    "threshold": 1945,
+    "test": 6484
+  },
+  "cost_assumptions": {
+    "false_negative": 5,
+    "false_positive": 1
+  },
+  "risk_bands": {
+    "low": 0.1,
+    "medium": 0.42
+  },
+  "best_params": {
+    "n_estimators": 100,
+    "learning_rate": 0.1,
+    "max_depth": 3,
+    "min_samples_leaf": 1
+  },
+  "runtime_versions": {
+    "python": "3.13.9",
+    "numpy": "2.3.5",
+    "pandas": "2.3.3",
+    "scikit_learn": "1.7.2"
+  },
   "features": [
     "person_income",
     "person_emp_length",

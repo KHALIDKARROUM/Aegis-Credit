@@ -15,7 +15,12 @@ the affected version.
 - Set a long random `SECRET_KEY` whenever `DEBUG=False`.
 - Serve the deployed application only through HTTPS.
 - Restrict dashboard access before using non-demo data.
+- Set `LOGIN_REQUIRED=True` for every shared deployment and assign least-privilege roles.
+- Use PostgreSQL for shared deployments; local SQLite files are not durable service storage.
 - Never commit applicant records, credentials, or environment files.
+- Keep `AUDIT_HMAC_KEY` separate from public API credentials and rotate it under change control.
+- Configure retention and run `purge_old_cases` under an approved schedule.
+- Back up and restore-test the case database.
 - Treat pickle/joblib model artifacts as trusted-code artifacts. Load only files
   produced by the controlled training pipeline and verify `models/model_manifest.json`.
 - Keep Python and pinned dependencies updated after compatibility testing.

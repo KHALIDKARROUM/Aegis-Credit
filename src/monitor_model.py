@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Any
 
@@ -8,7 +9,12 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from .train_model import MODEL_BUNDLE_PATH, REPORTS_DIR
+from .train_model import (
+    MODEL_BUNDLE_PATH,
+    MODEL_MANIFEST_PATH,
+    REPORTS_DIR,
+    file_sha256,
+)
 
 
 def _status(value: float) -> str:
@@ -85,8 +91,15 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
+    manifest = json.loads(MODEL_MANIFEST_PATH.read_text(encoding="utf-8"))
+    if file_sha256(MODEL_BUNDLE_PATH) != manifest.get("model_sha256"):
+        raise SystemExit("Model integrity verification failed.")
     model_bundle = joblib.load(MODEL_BUNDLE_PATH)
     incoming = pd.read_csv(args.data)
+    required = set(model_bundle["features"])
+    missing = sorted(required - set(incoming.columns))
+    if missing:
+        raise SystemExit(f"Incoming data is missing columns: {', '.join(missing)}")
     report = build_drift_report(incoming, model_bundle)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     report.to_csv(args.output, index=False)

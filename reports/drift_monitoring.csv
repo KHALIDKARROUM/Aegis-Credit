@@ -1,9 +1,9 @@
 feature,feature_type,drift_score,status
-loan_intent,categorical,0.0005354554794303815,stable
-person_home_ownership,categorical,0.00047160349361498907,stable
-cb_person_default_on_file,categorical,0.0004347979656018769,stable
-cb_person_cred_hist_length,numeric,4.1955762960298415e-06,stable
-loan_amnt,numeric,2.5070906371918537e-06,stable
-person_income,numeric,1.3563653004053196e-06,stable
-loan_percent_income,numeric,8.727117336656898e-07,stable
-person_emp_length,numeric,8.707676990536583e-07,stable
+loan_intent,categorical,0.004321146982442313,stable
+person_home_ownership,categorical,0.002658144877470475,stable
+cb_person_default_on_file,categorical,0.000697333763659741,stable
+person_emp_length,numeric,0.0001749453087248458,stable
+loan_percent_income,numeric,0.00016017532238383846,stable
+loan_amnt,numeric,9.567413695067979e-05,stable
+person_income,numeric,5.9527321722189845e-05,stable
+cb_person_cred_hist_length,numeric,3.328059365116856e-05,stable

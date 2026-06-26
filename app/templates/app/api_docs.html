@@ -1,0 +1,49 @@
+{% extends "app/base.html" %}
+
+{% block title %}Scoring API · BankRisk Compass{% endblock %}
+
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">Integration</span>
+        <h1>Scoring API</h1>
+        <p>Authenticated, rate-limited, idempotent screening for one application at a time.</p>
+    </div>
+    <a class="secondary-button" href="{% url 'openapi-json' %}">OpenAPI JSON</a>
+</section>
+
+<section class="dashboard-grid split">
+    <article class="panel data-panel">
+        <h2>Endpoint</h2>
+        <pre class="code-block">POST /api/v1/score/
+X-API-Key: &lt;SCORING_API_KEY&gt;
+Idempotency-Key: &lt;UUID&gt;
+Content-Type: application/json</pre>
+        <p>API status: <strong>{% if api_enabled %}configured{% else %}disabled until SCORING_API_KEY is set{% endif %}</strong></p>
+    </article>
+    <article class="panel data-panel">
+        <h2>Behavior</h2>
+        <ul>
+            <li>Validates the same contract as the staff form.</li>
+            <li>Stores a durable case and keyed audit fingerprint.</li>
+            <li>Replays the same result for a repeated idempotency key.</li>
+            <li>Does not generate explanations or adverse-action reasons.</li>
+        </ul>
+    </article>
+</section>
+
+<section class="panel data-panel">
+    <h2>Example body</h2>
+    <pre class="code-block">{
+  "applicant_reference": "APP-001",
+  "person_age": 30,
+  "person_income": 65000,
+  "person_emp_length": 5,
+  "person_home_ownership": "RENT",
+  "loan_amnt": 8000,
+  "loan_intent": "PERSONAL",
+  "cb_person_cred_hist_length": 6,
+  "cb_person_default_on_file": "N"
+}</pre>
+</section>
+{% endblock %}

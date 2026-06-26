@@ -1,0 +1,43 @@
+{% extends "app/base.html" %}
+
+{% block title %}Batch {{ batch.file_name }} · BankRisk Compass{% endblock %}
+
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">Batch result</span>
+        <h1>{{ batch.file_name }}</h1>
+        <p>{{ batch.get_status_display }} · {{ batch.valid_rows }} scored · {{ batch.invalid_rows }} invalid</p>
+    </div>
+    <div class="page-actions">
+        <a class="secondary-button" href="{% url 'batch-results' batch.id %}">Download results</a>
+        <a class="text-button" href="{% url 'batch-upload' %}">Load another file</a>
+    </div>
+</section>
+
+<section class="panel data-panel">
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead><tr><th>Row</th><th>Reference</th><th>Status</th><th>Probability</th><th>Risk</th><th>Recommendation or errors</th><th></th></tr></thead>
+            <tbody>
+                {% for row in batch.results %}
+                    <tr>
+                        <td>{{ row.row }}</td>
+                        <td>{{ row.applicant_reference|default:"—" }}</td>
+                        <td>{{ row.status }}</td>
+                        <td>{% if row.probability != None %}{{ row.probability|floatformat:3 }}{% else %}—{% endif %}</td>
+                        <td>{{ row.risk_category|default:"—" }}</td>
+                        <td>
+                            {{ row.recommended_next_step }}
+                            {% for error in row.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+                        </td>
+                        <td>{% if row.case_id %}<a class="inline-link" href="{% url 'case-detail' row.case_id %}">Case</a>{% endif %}</td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="7">No row results are available.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

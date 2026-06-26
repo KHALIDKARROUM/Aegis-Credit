@@ -35,8 +35,25 @@ jobs:
       - name: Run Django checks
         run: python manage.py check
 
+      - name: Apply migrations and bootstrap roles
+        run: |
+          python manage.py migrate --no-input
+          python manage.py bootstrap_roles
+
       - name: Verify migrations
         run: python manage.py makemigrations --check --dry-run
 
       - name: Run tests
         run: python manage.py test --verbosity 2
+
+      - name: Smoke-test monitoring tools
+        run: |
+          python -m src.monitor_model --data data/credit_risk.csv --output /tmp/drift.csv
+          python -m src.validate_external --data data/credit_risk.csv --output /tmp/external.csv
+
+      - name: Run deployment security checks
+        env:
+          DEBUG: "False"
+          SECRET_KEY: "ci-only-long-random-deployment-secret-key-1234567890-abcdef"
+          ALLOWED_HOSTS: "example.test"
+        run: python manage.py check --deploy

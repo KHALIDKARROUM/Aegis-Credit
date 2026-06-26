@@ -13,11 +13,4 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    const threshold = document.querySelector('input[name="threshold"]');
-    const output = threshold?.parentElement?.querySelector("output");
-    if (threshold && output) {
-        threshold.addEventListener("input", () => {
-            output.value = Number(threshold.value).toFixed(2);
-        });
-    }
 });

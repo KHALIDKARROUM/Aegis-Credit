@@ -1,0 +1,51 @@
+{% extends "app/base.html" %}
+
+{% block title %}Operational monitoring · BankRisk Compass{% endblock %}
+
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">Model operations</span>
+        <h1>Monitoring</h1>
+        <p>Operational volume, human overrides, and the latest offline drift report.</p>
+    </div>
+</section>
+
+<section class="metric-grid four-col">
+    <article class="metric-tile"><div class="metric-label">Scores</div><div class="metric-value">{{ total_scores }}</div></article>
+    <article class="metric-tile"><div class="metric-label">Open cases</div><div class="metric-value">{{ open_cases }}</div></article>
+    <article class="metric-tile"><div class="metric-label">Reviewed cases</div><div class="metric-value">{{ reviewed_cases }}</div></article>
+    <article class="metric-tile"><div class="metric-label">Override rate</div><div class="metric-value">{{ override_rate }}</div></article>
+</section>
+
+<section class="dashboard-grid three-col">
+    <article class="panel data-panel">
+        <h2>By risk level</h2>
+        <dl class="detail-list">
+            {% for row in by_risk %}<div><dt>{{ row.risk_category }}</dt><dd>{{ row.count }} · avg {{ row.average_probability|floatformat:3 }}</dd></div>{% empty %}<p>No scores yet.</p>{% endfor %}
+        </dl>
+    </article>
+    <article class="panel data-panel">
+        <h2>By source</h2>
+        <dl class="detail-list">
+            {% for row in by_source %}<div><dt>{{ row.source }}</dt><dd>{{ row.count }}</dd></div>{% empty %}<p>No scores yet.</p>{% endfor %}
+        </dl>
+    </article>
+    <article class="panel data-panel">
+        <h2>Recent volume</h2>
+        <dl class="detail-list">
+            {% for row in daily %}<div><dt>{{ row.day }}</dt><dd>{{ row.scores }} · avg {{ row.average_probability|floatformat:3 }}</dd></div>{% empty %}<p>No scores yet.</p>{% endfor %}
+        </dl>
+    </article>
+</section>
+
+<section class="panel data-panel">
+    <div class="card-heading"><div><h2>Latest drift report</h2><p>Run the monitoring command against a representative incoming batch to refresh this table.</p></div></div>
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead><tr>{% for column in drift_table.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead>
+            <tbody>{% for row in drift_table.rows %}<tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>{% empty %}<tr><td>No drift report is available.</td></tr>{% endfor %}</tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

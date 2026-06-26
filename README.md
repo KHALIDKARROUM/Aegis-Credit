@@ -1,230 +1,271 @@
 # BankRisk Compass
 
-BankRisk Compass is an end-to-end credit default risk decision-support project. It trains and calibrates a machine learning model, evaluates it on an untouched test set, and packages it in a Django dashboard with validated applicant scoring, local explanations, threshold analysis, calibration diagnostics, and governance metadata.
+BankRisk Compass is an end-to-end credit-risk screening and model-governance
+project. It combines a calibrated machine-learning model with a human review
+workflow, durable case records, batch applicant loading, monitoring, threshold
+economics, authenticated API scoring, and deployment controls.
 
-## Business Problem
+It is designed as a learning, portfolio, and controlled pilot system. It does
+not approve or decline credit and does not generate compliant adverse-action
+notices.
 
-Banks need to approve profitable borrowers while controlling default risk. A model that only maximizes accuracy is not enough because the two main mistakes have different business costs:
+## Product capabilities
 
-- False negative: a risky borrower is approved.
-- False positive: a safer borrower is rejected or sent to manual review.
+- blank-by-default applicant assessment with an explicit demo-data option;
+- validated application-time inputs and unusual-value warnings;
+- calibrated probability, reachable Low/Medium/High bands, and staff guidance;
+- model-behavior explanations clearly separated from adverse-action reasons;
+- durable assessment cases with notes, status, assignments, and documented overrides;
+- idempotent web/API scoring and keyed audit fingerprints;
+- CSV and Excel batch upload with row-level validation and downloadable results;
+- operational volume, risk-mix, override, and drift monitoring;
+- financial threshold scenarios using exposure, LGD, margin, and review cost;
+- analyst, reviewer, and administrator access roles;
+- OpenAPI documentation, API-key authentication, and rate limiting;
+- SQLite for local use and PostgreSQL support for shared deployments;
+- Windows launchers, Docker Compose, Render configuration, health checks, and CI.
 
-This project uses a business threshold that treats false negatives as more expensive than false positives, which is closer to how credit-risk decisions work in practice.
+## Current model
 
-## Dataset
+Version `2.1.0` selects the champion after each candidate has been calibrated and
+given a threshold on separate data partitions.
 
-The project uses `data/credit_risk.csv`, which contains borrower, loan, and credit-history fields:
+| Model | Selection F1 | ROC-AUC | Brier score | Threshold |
+|---|---:|---:|---:|---:|
+| Gradient Boosting | 0.655 | 0.890 | 0.087 | 0.21 |
+| Random Forest | 0.643 | 0.879 | 0.091 | 0.19 |
+| Logistic Regression | 0.558 | 0.826 | 0.122 | 0.22 |
 
-- borrower profile: age, income, employment length, home ownership
-- loan profile: amount, interest rate, loan grade, loan intent, loan-to-income ratio
-- credit history: previous default flag, credit history length
-- target: `loan_status`, where `1` means default and `0` means non-default
+The selected calibrated Gradient Boosting model achieved these results on the
+untouched final test set:
 
-The dataset has 32,581 rows and 12 columns. The target is imbalanced, with about 22% default cases.
-
-## Project Structure
-
-```text
-BankRisk-Compass/
-├── app/
-│   ├── static/
-│   │   └── app/
-│   │       ├── app.js
-│   │       └── styles.css
-│   ├── templates/
-│   │   └── app/
-│   ├── forms.py
-│   ├── models.py
-│   ├── services.py
-│   ├── tests.py
-│   ├── urls.py
-│   └── views.py
-├── bankrisk_compass/
-│   ├── settings.py
-│   └── urls.py
-├── data/
-│   └── credit_risk.csv
-├── manage.py
-├── models/
-│   ├── credit_risk_model.pkl
-│   └── model_manifest.json
-├── notebooks/
-│   └── bank.ipynb
-├── reports/
-│   ├── business_report.md
-│   ├── classification_report.txt
-│   ├── confusion_matrix.png
-│   ├── final_model_metrics.csv
-│   ├── model_comparison.csv
-│   ├── model_comparison.png
-│   ├── permutation_importance.csv
-│   ├── permutation_importance.png
-│   ├── threshold_analysis.csv
-│   └── threshold_tradeoff.png
-├── src/
-│   ├── __init__.py
-│   ├── model_reporting.py
-│   ├── monitor_model.py
-│   └── train_model.py
-├── DATA_CARD.md
-├── MODEL_CARD.md
-├── README.md
-├── requirements.txt
-└── requirements-prod.txt
-```
-
-## Workflow
-
-1. Load and inspect the credit-risk dataset.
-2. Check missing values, class balance, and data quality issues.
-3. Explore default patterns by income, loan amount, interest rate, grade, and loan intent.
-4. Train models using a leakage-safe `Pipeline` and `ColumnTransformer`.
-5. Split data into training, validation/calibration, and final test sets.
-6. Compare Logistic Regression, Random Forest, and Gradient Boosting on validation data.
-7. Tune and calibrate the Random Forest model.
-8. Select a decision threshold on validation data using a 5:1 false-negative to false-positive cost ratio.
-9. Evaluate once on the untouched final test set.
-10. Save a versioned model bundle and integrity manifest.
-11. Generate reports, calibration, subgroup diagnostics, explanations, and the Django dashboard.
-
-## Leakage Prevention
-
-The notebook originally handled missing values and encoding before splitting the data. That can leak test-set information into training. The final project fixes this by placing preprocessing inside a scikit-learn pipeline:
-
-- numeric features: median imputation and scaling
-- categorical features: most-frequent imputation and one-hot encoding
-- model: Random Forest classifier
-
-Because preprocessing is fitted inside the pipeline, transformations are learned only from the training fold.
-
-## Model Results
-
-The final model is a calibrated Random Forest using application-time features. Loan grade and interest rate are excluded because they may be lender-assigned after underwriting begins. Age is used for input consistency checks and monitoring, but is excluded from the score itself.
-
-| Model | Accuracy | Precision | Recall | F1-score | ROC-AUC |
+| Policy | Accuracy | Precision | Recall | F1 | ROC-AUC |
 |---|---:|---:|---:|---:|---:|
-| Random Forest | 0.880 | 0.847 | 0.551 | 0.668 | 0.870 |
+| Threshold 0.50 | 0.884 | 0.880 | 0.543 | 0.672 | 0.881 |
+| Screening threshold 0.21 | 0.828 | 0.582 | 0.755 | 0.657 | 0.881 |
 
-At the default `0.50` threshold, the final-test accuracy is 0.880 and ROC-AUC is 0.870. The validation-selected business threshold is `0.19`; on the final test set it increases default recall from 0.551 to 0.724 while routing more applicants to review. See `reports/final_model_metrics.csv` for the complete results.
+At `0.21`, 28.4% of the test population is routed to review, compared with
+13.5% at `0.50`. The included 5:1 cost ratio remains illustrative. The Business
+Policy page lets reviewers replace it with explicit financial assumptions
+without silently changing the live model.
 
-## Dashboard
+## Validation design
 
-The Django dashboard includes:
+The cleaned dataset is divided into five non-overlapping partitions:
 
-- applicant risk prediction form
-- probability of default
-- Low / Medium / High risk category
-- recommended action based on the business threshold
-- top local factors influencing the applicant score
-- validated input errors and out-of-distribution warnings
-- model comparison chart
-- threshold tradeoff chart
-- confusion matrix
-- permutation importance chart
-- probability calibration and age-group monitoring diagnostics
+- training: 19,449 rows;
+- model selection: 2,593 rows;
+- probability calibration: 1,945 rows;
+- threshold selection: 1,945 rows;
+- final test: 6,484 rows.
 
-Run it with:
+Preprocessing remains inside scikit-learn pipelines. Feature-reference and drift
+baselines are built from training rows only. Loan grade and interest rate are
+excluded from application-time scoring because they may be lender-assigned.
+Age is excluded from the score and used only for plausibility checks and limited
+monitoring.
+
+## Quick start
+
+### Windows, no containers
+
+1. Install Python 3.13 and select **Add Python to PATH**.
+2. Double-click `Start BankRisk Compass.bat`.
+3. Open `http://127.0.0.1:8000/`.
+
+The launcher creates `.venv`, installs runtime packages, runs migrations, and
+opens the browser. Local access control is disabled by default because the
+server listens only on `127.0.0.1`.
+
+### Windows with Docker Desktop
+
+Double-click `Start BankRisk Compass Docker.bat`. This starts the application
+and a durable local PostgreSQL database.
+
+### Any platform with Docker
 
 ```bash
-python manage.py runserver
+docker compose up --build
 ```
 
-## How to Run
-
-### One-click Windows launch
-
-For non-technical Windows users:
-
-1. Install Python 3.13 and select **Add Python to PATH** during installation.
-2. Download or copy the complete project folder.
-3. Double-click `Start BankRisk Compass.bat`.
-
-The launcher creates a private Python environment, installs the required packages,
-opens the dashboard in the default browser, and starts the local server. The first
-launch takes longer because dependencies are installed. Keep the launcher window
-open while using the application; close it or press `Ctrl+C` to stop the app.
-It uses the smaller `requirements-app.txt` runtime dependency list; notebook,
-training, and deployment tools are not installed for end users.
-
-### Developer launch
-
-Install dependencies with the Python already available on your machine:
+### Developer setup
 
 ```bash
+python -m venv .venv
+.venv\Scripts\activate
 python -m pip install -r requirements.txt
-```
-
-The saved model bundle is already included, so training is optional before starting the dashboard.
-
-Train the model and regenerate reports:
-
-```bash
-python -m src.train_model
-```
-
-For faster local iteration, use the smaller tuning grid:
-
-```bash
-python -m src.train_model --quick
-```
-
-Open the notebook:
-
-```bash
-jupyter notebook notebooks/bank.ipynb
-```
-
-Start the dashboard:
-
-```bash
+python manage.py migrate
+python manage.py bootstrap_roles
 python manage.py runserver
 ```
 
-Open the dashboard at:
+On macOS/Linux, activate with `source .venv/bin/activate`.
+
+## Authentication and roles
+
+Set `LOGIN_REQUIRED=True` for any shared deployment. Create role groups and an
+optional first administrator with:
+
+```bash
+python manage.py bootstrap_roles
+```
+
+The optional environment variables are:
 
 ```text
-http://127.0.0.1:8000/
+BOOTSTRAP_ADMIN_USERNAME
+BOOTSTRAP_ADMIN_PASSWORD
+BOOTSTRAP_ADMIN_EMAIL
 ```
 
-## Key Files
+Roles:
 
-- `notebooks/bank.ipynb`: polished analysis notebook with EDA, modeling workflow, and final report.
-- `src/train_model.py`: reusable training script with leakage-safe preprocessing, model tuning, threshold tuning, report generation, and model saving.
-- `models/credit_risk_model.pkl`: compressed model bundle used by the dashboard.
-- `models/model_manifest.json`: model/data hashes and reproducibility metadata.
-- `reports/business_report.md`: concise final business interpretation.
-- `MODEL_CARD.md` and `DATA_CARD.md`: intended use, limitations, provenance, and controls.
-- `manage.py`: Django command entry point.
-- `bankrisk_compass/settings.py`: Django project settings.
-- `app/views.py`: Django dashboard pages.
-- `app/services.py`: model loading, scoring, report loading, and dashboard data helpers.
+- **Analysts** can score, load batches, and view cases.
+- **Reviewers** can also edit case status, record overrides, and view governance pages.
+- **Administrators** have reviewer access plus Django administration.
 
-## Validation
+## Batch applicant loading
 
-```bash
-python manage.py migrate
-python manage.py check
-python manage.py test
-python -m compileall -q app bankrisk_compass src
+Open `/batch/` or download `/batch/template.csv`. Supported files are `.csv`
+and `.xlsx`. Required columns:
+
+```text
+person_age
+person_income
+person_emp_length
+person_home_ownership
+loan_amnt
+loan_intent
+cb_person_cred_hist_length
+cb_person_default_on_file
 ```
 
-The GitHub Actions workflow runs these checks for pushes and pull requests.
+`applicant_reference` is optional. Use an internal case number, not a name,
+account number, or government identifier. Invalid rows are reported separately
+and are not scored.
 
-Compare a new batch with the training distribution:
+## Scoring API
+
+Set `SCORING_API_KEY`, then use:
+
+```text
+POST /api/v1/score/
+X-API-Key: <key>
+Idempotency-Key: <UUID>
+Content-Type: application/json
+```
+
+Interactive documentation is at `/api/docs/`; the OpenAPI document is at
+`/api/v1/openapi.json`.
+
+The endpoint uses the same validation contract as the web form, enforces a
+configurable per-minute limit, stores a case, and returns the same result when
+an idempotency key is replayed. It deliberately omits local explanations for
+latency and governance reasons.
+
+## Monitoring and validation commands
+
+Compare incoming feature distributions with the training baseline:
 
 ```bash
 python -m src.monitor_model --data path/to/new_applicants.csv
 ```
 
-The command writes PSI/total-variation diagnostics to `reports/drift_monitoring.csv`.
+Evaluate a labeled external or out-of-time sample:
 
-## Scoring API
+```bash
+python -m src.validate_external --data path/to/mature_outcomes.csv
+```
 
-Set `SCORING_API_KEY`, then send validated JSON to `POST /api/v1/score/` with
-either `X-API-Key` or `Authorization: Bearer <key>`. The API returns a versioned
-probability and screening recommendation without performing the slower SHAP step.
-If no API key is configured, the endpoint remains disabled.
+Preview or execute data retention:
 
-## Important limitation
+```bash
+python manage.py purge_old_cases --days 365
+python manage.py purge_old_cases --days 365 --confirm
+```
 
-This is a demonstration and decision-support project, not a production credit decision engine. Operational use requires independent validation, representative data, authenticated access, durable monitoring, fair-lending review, and compliant adverse-action procedures.
+Retrain and regenerate artifacts:
+
+```bash
+python -m src.train_model --quick
+```
+
+Remove `--quick` for the full Random Forest tuning grid.
+For a release artifact, commit the intended source changes and run with
+`--require-clean` so the manifest cannot be produced from an uncommitted tree.
+
+## Production configuration
+
+Copy `.env.example` as a reference. Important settings include:
+
+| Variable | Purpose |
+|---|---|
+| `SECRET_KEY` | Django cryptographic secret |
+| `AUDIT_HMAC_KEY` | Separate key for applicant-feature fingerprints |
+| `DATABASE_URL` | PostgreSQL connection URL |
+| `LOGIN_REQUIRED` | Enforce staff authentication |
+| `SCORING_API_KEY` | Enable API scoring |
+| `API_RATE_LIMIT_PER_MINUTE` | API request ceiling |
+| `CASE_RETENTION_DAYS` | Retention-command default |
+| `MAX_BATCH_ROWS` | Batch row limit |
+| `MAX_UPLOAD_BYTES` | Upload size limit |
+
+Shared deployments must use PostgreSQL. SQLite is intentionally retained only
+for local single-user operation.
+
+## Project structure
+
+```text
+app/                  Django workflows, templates, forms, models, and tests
+bankrisk_compass/     Django settings and URL configuration
+data/                 Demonstration dataset
+models/               Versioned model bundle and integrity manifest
+reports/              Generated evaluation and governance reports
+src/                  Training, drift monitoring, and external validation
+docs/                 User and operations guidance
+Dockerfile            Production-style container image
+docker-compose.yml    Local PostgreSQL deployment
+render.yaml           Render web service and PostgreSQL blueprint
+MODEL_CARD.md          Intended use, metrics, limitations, and controls
+DATA_CARD.md           Data quality, representation, privacy, and provenance
+```
+
+The externally owned production gates are tracked in
+`docs/GOVERNANCE_CHECKLIST.md`.
+Setup failures and removal steps are covered in `docs/TROUBLESHOOTING.md`.
+
+## Verification
+
+```bash
+python manage.py migrate
+python manage.py check
+python manage.py makemigrations --check --dry-run
+python manage.py test
+python -m compileall -q app bankrisk_compass src
+python -m pip check
+```
+
+## Licensing and provenance
+
+Project source code is licensed under the MIT License. The included dataset is
+not covered by that license. Its exact upstream source and redistribution terms
+are not established in the repository; see `DATA_PROVENANCE.md`.
+
+Do not redistribute or operationalize the dataset until provenance, permission,
+geographic scope, collection period, definitions, and representativeness have
+been independently confirmed.
+
+## What code cannot complete
+
+Real lending use still requires organization-specific work:
+
+- representative bank and product data with mature outcomes;
+- approved PD/LGD/EAD and profitability assumptions;
+- independent model validation and change approval;
+- legal and fair-lending review using appropriate protected-class analysis;
+- validated, specific adverse-action reason mapping;
+- penetration testing, incident response, backups, and recovery exercises;
+- human staffing, service-level targets, override governance, and periodic review.
+
+The system is decision support. It must not be treated as an autonomous credit
+decision engine.

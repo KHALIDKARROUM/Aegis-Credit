@@ -1,0 +1,50 @@
+{% extends "app/base.html" %}
+
+{% block title %}Business policy · BankRisk Compass{% endblock %}
+
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">Decision economics</span>
+        <h1>Business threshold scenario</h1>
+        <p>Replace the illustrative 5:1 error ratio with explicit financial assumptions.</p>
+    </div>
+</section>
+
+<section class="dashboard-grid split-wide">
+    <article class="panel data-panel">
+        <form method="get" class="review-form">
+            {% for field in economics_form %}
+                <div class="field-group">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    <span class="field-hint">{{ field.help_text }}</span>
+                    {% for error in field.errors %}<span class="field-error">{{ error }}</span>{% endfor %}
+                </div>
+            {% endfor %}
+            <button class="primary-button" type="submit">Calculate scenario</button>
+        </form>
+    </article>
+    <article class="panel recommendation-panel">
+        <span class="recommendation-kicker">Lowest estimated cost</span>
+        {% if recommended_display %}
+            <h2>Threshold {{ recommended_display.threshold }}</h2>
+            <p>Estimated portfolio cost: {{ recommended_display.estimated_total_cost }}</p>
+            <p>Review rate: {{ recommended_display.review_rate }} · Recall: {{ recommended_display.recall }}</p>
+        {% else %}
+            <h2>Enter assumptions</h2>
+            <p>The saved model threshold remains {{ model_threshold|floatformat:2 }} until an approved policy change is retrained and versioned.</p>
+        {% endif %}
+        <div class="plain-note">Scenario results do not change live scoring. Policy approval, validation, and a new model artifact are required.</div>
+    </article>
+</section>
+
+<section class="panel data-panel">
+    <div class="table-wrap tall">
+        <table class="data-table">
+            <thead><tr>{% for column in economics_table.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead>
+            <tbody>{% for row in economics_table.rows %}<tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

@@ -1,74 +1,94 @@
 # BankRisk Compass Model Card
 
-## Model identity
+## Identity
 
-- Version: `2.0.0`
-- Model: calibrated Random Forest classifier
-- Intended stage: application-time screening
-- Target: `loan_status` (`1` means default)
-- Output: calibrated probability of default plus a review threshold
+- Version: `2.1.0`
+- Champion: calibrated Gradient Boosting classifier
+- Stage: application-time screening and human review prioritization
+- Target: `loan_status`, where `1` represents default
+- Output: calibrated probability, risk band, and screening recommendation
 
-The serialized bundle and `models/model_manifest.json` contain the training timestamp,
-Git commit, dataset hash, feature contract, dependency versions, and artifact hash.
+The serialized bundle and `models/model_manifest.json` include the training
+timestamp, Git state, data hash, model hash, feature contract, split sizes, and
+runtime versions.
 
 ## Intended use
 
-The model is a learning and decision-support system for demonstrating credit-risk
-modeling. It may help prioritize applications for human review.
+The model may support demonstrations, analyst training, portfolio development,
+and controlled pilot review queues.
 
-It must not be used as:
+It must not:
 
-- an autonomous approval or decline engine;
-- an adverse-action notice generator;
-- a substitute for legal, compliance, or independent model validation;
-- a production lending system without representative data and monitoring.
+- autonomously approve or decline credit;
+- generate adverse-action notices;
+- replace affordability, identity, policy, fraud, or compliance checks;
+- be used operationally without representative data and independent validation.
 
 ## Feature contract
 
-Application-time scoring features:
+Scored features:
 
 - annual income;
 - employment length;
 - home ownership;
-- requested loan amount;
+- requested amount;
 - loan intent;
 - credit-history length;
 - prior-default indicator;
 - derived loan-to-income ratio.
 
-`loan_grade` and `loan_int_rate` are excluded from applicant scoring because they
-may be assigned by the lender after underwriting starts.
+Loan grade and interest rate are excluded because they may be assigned after
+underwriting begins. Age is collected for plausibility validation and limited
+monitoring but is excluded from the probability model.
 
-Age is collected for plausibility validation and subgroup monitoring, but is
-excluded from the score itself.
+## Development design
 
-## Development and evaluation
+Exact duplicates are removed and implausible age/employment values are replaced
+with missing values before pipeline imputation. Preprocessing is fitted only on
+training rows.
 
-Data is split into training, validation/calibration, and final test sets.
+Non-overlapping partitions:
 
-- Hyperparameter fitting occurs on training data.
-- Probability calibration and threshold selection occur on validation data.
-- Final metrics are measured once on the untouched test set.
+- training: 19,449;
+- model selection: 2,593;
+- calibration: 1,945;
+- threshold selection: 1,945;
+- final test: 6,484.
 
-Current final-test results are stored in `reports/final_model_metrics.csv`.
-Calibration and age-group diagnostics are stored in `reports/`.
+Logistic Regression, tuned Random Forest, and Gradient Boosting candidates are
+calibrated and thresholded before comparison. The champion is selected on the
+model-selection partition using business cost, followed by F1 and ROC-AUC.
 
-## Limitations
+## Final-test performance
 
-- The public dataset may not represent a particular bank, geography, product, or period.
-- Protected-class attributes required for a complete fair-lending assessment are unavailable.
-- Some age groups have very small sample sizes.
-- Relationships in historical data may change over time.
-- The 5:1 error-cost ratio is illustrative and requires business approval.
-- Local SHAP factors explain model behavior; they are not automatically compliant
-  adverse-action reasons.
+| Policy | Accuracy | Precision | Recall | F1 | ROC-AUC | Brier |
+|---|---:|---:|---:|---:|---:|---:|
+| 0.50 | 0.884 | 0.880 | 0.543 | 0.672 | 0.881 | 0.089 |
+| 0.21 | 0.828 | 0.582 | 0.755 | 0.657 | 0.881 | 0.089 |
 
-## Required controls before production
+The `0.21` threshold uses an illustrative 5:1 false-negative/false-positive cost
+ratio. It routes approximately 28.4% of final-test applications to review.
 
-- independent model validation;
-- legal and fair-lending review;
-- approved adverse-action reason mapping;
-- authenticated access and durable audit storage;
-- drift, calibration, performance, and subgroup monitoring;
-- documented override and rollback procedures;
-- periodic threshold and cost-assumption review.
+## Explanations
+
+Local SHAP factors describe the behavior of the underlying tree model. They are
+not automatically specific, accurate, validated adverse-action reasons.
+
+If SHAP is unavailable, the interface shows separately labeled review checks.
+Fallback checks must never be represented as model-derived reasons.
+
+## Fairness and representation
+
+Age is excluded from scoring. Age-group reports are diagnostic only. The oldest
+test groups contain very few observations, and the dataset does not contain the
+protected-class and product context required for a complete fair-lending review.
+
+## Required production controls
+
+- organization-specific data and out-of-time/external validation;
+- approved expected-loss and profitability assumptions;
+- independent model validation and challenger review;
+- validated reason-code mapping and legal review;
+- subgroup, drift, calibration, performance, and override monitoring;
+- version approval, rollback, incident, backup, and recovery procedures;
+- periodic review of thresholds, risk bands, retention, and access.

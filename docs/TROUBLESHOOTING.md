@@ -1,0 +1,72 @@
+# Troubleshooting and Removal
+
+## Windows launcher closes or reports missing Python
+
+- Install 64-bit Python 3.13 from python.org.
+- Select **Add Python to PATH**.
+- Close and reopen File Explorer or the terminal.
+- Delete `.venv` only if the launcher reports that its Python version is unsupported.
+
+## Package installation fails
+
+- Confirm internet and proxy access to PyPI.
+- Check available disk space.
+- Run `.venv\Scripts\python.exe -m pip check`.
+- Delete `.venv` and rerun the launcher if the environment is incomplete.
+
+## Port 8000 is already in use
+
+Stop the other local server or run:
+
+```bash
+python manage.py runserver 127.0.0.1:8001
+```
+
+## Assessment unavailable
+
+Run:
+
+```bash
+python manage.py check
+python manage.py migrate
+python manage.py bootstrap_roles
+python manage.py shell -c "from app.services import load_model_bundle; print(load_model_bundle()['model_version'])"
+```
+
+An integrity failure means the model file and manifest do not match. Regenerate
+both together with the training command; do not bypass the check.
+
+## Docker does not start
+
+- Start Docker Desktop and wait for its engine to report ready.
+- Run `docker compose config`.
+- Inspect with `docker compose logs web database`.
+- If port 8000 is occupied, change the host-side port in `docker-compose.yml`.
+
+## Reset local demonstration data
+
+Native SQLite:
+
+1. Stop the application.
+2. Delete `db.sqlite3`.
+3. Run `python manage.py migrate` and `python manage.py bootstrap_roles`.
+
+Docker:
+
+```bash
+docker compose down
+```
+
+To also permanently delete the local PostgreSQL volume:
+
+```bash
+docker compose down -v
+```
+
+The `-v` form destroys local case and audit data. Export anything required first.
+
+## Remove the local installation
+
+Stop the server, then delete `.venv`, `db.sqlite3`, and `staticfiles`. The source
+project and generated model/report artifacts remain until the project folder is
+removed.
