@@ -184,15 +184,16 @@ python manage.py purge_old_cases --days 365
 python manage.py purge_old_cases --days 365 --confirm
 ```
 
-Retrain and regenerate artifacts:
+Release retraining (only after data provenance approval):
 
 ```bash
-python -m src.train_model --quick
+python -m src.train_model --release
 ```
 
-Remove `--quick` for the full Random Forest tuning grid.
-For a release artifact, commit the intended source changes and run with
-`--require-clean` so the manifest cannot be produced from an uncommitted tree.
+Add `--quick` only for an approved short release-validation run. The command
+requires a clean worktree, exactly one tag at `HEAD`, approved data provenance,
+and an Ed25519 private signing key supplied through a secret manager. The
+checked-in demonstration artifact is intentionally not eligible for scoring.
 
 ## Production configuration
 
@@ -202,11 +203,15 @@ Copy `.env.example` as a reference. Important settings include:
 |---|---|
 | `SECRET_KEY` | Django cryptographic secret |
 | `AUDIT_HMAC_KEY` | Separate key for applicant-feature fingerprints |
+| `FIELD_ENCRYPTION_KEY` | Fernet key for persisted applicant fields |
+| `BACKUP_ENCRYPTION_KEY` | Separate Fernet key for database backups |
+| `MODEL_SIGNING_PUBLIC_KEY` | Ed25519 public key used to verify model releases |
 | `DATABASE_URL` | PostgreSQL connection URL |
 | `LOGIN_REQUIRED` | Enforce staff authentication |
 | `SCORING_API_KEY` | Enable API scoring |
 | `API_RATE_LIMIT_PER_MINUTE` | API request ceiling |
 | `CASE_RETENTION_DAYS` | Retention-command default |
+| `DATA_PROVENANCE_VERIFIED` | Enables only formally approved training data |
 | `MAX_BATCH_ROWS` | Batch row limit |
 | `MAX_UPLOAD_BYTES` | Upload size limit |
 

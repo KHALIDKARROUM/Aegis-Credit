@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import io
 import csv
+import base64
 import hashlib
 import hmac
 import json
@@ -17,6 +18,8 @@ from typing import Any
 import joblib
 import numpy as np
 import pandas as pd
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from django.conf import settings
 from django.core.cache import cache
 from matplotlib.backends.backend_pdf import PdfPages
@@ -92,6 +95,42 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _canonical_manifest(manifest: dict[str, Any]) -> bytes:
+    return json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _verify_release_manifest(manifest: dict[str, Any]) -> None:
+    if not settings.DATA_PROVENANCE_VERIFIED:
+        raise ArtifactIntegrityError("Data provenance has not been approved; scoring is disabled.")
+    if manifest.get("git_dirty") is not False or not manifest.get("git_tag"):
+        raise ArtifactIntegrityError("Model was not released from a clean, tagged Git commit.")
+    if manifest.get("data_provenance_verified") is not True:
+        raise ArtifactIntegrityError("Model manifest does not attest to verified training-data provenance.")
+    signature = manifest.get("signature")
+    if manifest.get("signature_algorithm") != "ed25519" or not signature:
+        raise ArtifactIntegrityError("Model manifest is unsigned.")
+    unsigned_manifest = dict(manifest)
+    unsigned_manifest.pop("signature", None)
+    try:
+        public_key = Ed25519PublicKey.from_public_bytes(
+            base64.b64decode(settings.MODEL_SIGNING_PUBLIC_KEY, validate=True)
+        )
+        public_key.verify(base64.b64decode(signature, validate=True), _canonical_manifest(unsigned_manifest))
+    except (ValueError, TypeError, InvalidSignature) as exc:
+        raise ArtifactIntegrityError("Model manifest signature verification failed.") from exc
+
+
+def _release_artifact_path(manifest: dict[str, Any]) -> Path:
+    relative_path = manifest.get("artifact_path")
+    if not isinstance(relative_path, str) or not relative_path:
+        raise ArtifactIntegrityError("Model manifest does not identify an immutable release artifact.")
+    candidate = (MODEL_MANIFEST_PATH.parent / relative_path).resolve()
+    releases_dir = (MODEL_MANIFEST_PATH.parent / "releases").resolve()
+    if releases_dir not in candidate.parents or candidate.name != "model.pkl":
+        raise ArtifactIntegrityError("Model manifest artifact path is invalid.")
+    return candidate
+
+
 @lru_cache(maxsize=1)
 def load_model_bundle() -> dict[str, Any]:
     if not MODEL_PATH.exists():
@@ -101,18 +140,24 @@ def load_model_bundle() -> dict[str, Any]:
     if not MODEL_MANIFEST_PATH.exists():
         raise FileNotFoundError("Model manifest not found. Regenerate the model artifacts.")
     manifest = json.loads(MODEL_MANIFEST_PATH.read_text(encoding="utf-8"))
+    _verify_release_manifest(manifest)
+    artifact_path = _release_artifact_path(manifest)
     expected_hash = str(manifest.get("model_sha256", ""))
-    if not expected_hash or not compare_digest(_sha256(MODEL_PATH), expected_hash):
+    if not artifact_path.exists() or not expected_hash or not compare_digest(_sha256(artifact_path), expected_hash):
         raise ArtifactIntegrityError("Model artifact integrity verification failed.")
 
-    bundle = joblib.load(MODEL_PATH)
+    bundle = joblib.load(artifact_path)
     if str(bundle.get("model_version")) != str(manifest.get("model_version")):
         raise ArtifactIntegrityError("Model version does not match its manifest.")
+    if bundle.get("git_dirty") is not False or bundle.get("git_tag") != manifest.get("git_tag"):
+        raise ArtifactIntegrityError("Model bundle release metadata does not match its manifest.")
     return bundle
 
 
 @lru_cache(maxsize=1)
 def load_credit_data() -> pd.DataFrame:
+    if not settings.DATA_PROVENANCE_VERIFIED:
+        raise ArtifactIntegrityError("Unverified demonstration data cannot be loaded operationally.")
     return pd.read_csv(DATA_PATH)
 
 
@@ -570,7 +615,9 @@ def feature_digest(application: pd.DataFrame) -> str:
 
 def json_safe_application(result: dict[str, Any]) -> dict[str, Any]:
     values = dict(result["form"])
-    allowed = {"person_age", *result["application"].columns.tolist()}
+    # Age is not part of the model contract and is not retained. Persist only
+    # the minimum score inputs required for a human case review.
+    allowed = set(result["application"].columns.tolist())
     output: dict[str, Any] = {}
     for key in allowed:
         value = values.get(key)

@@ -19,7 +19,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from . import services
-from .access import access_required, user_role
+from .access import access_required, record_sensitive_access, user_role
 from .forms import (
     ApplicantAssessmentForm,
     BatchUploadForm,
@@ -138,6 +138,7 @@ def _persist_result(
             "model_version": str(bundle.get("model_version", "legacy")),
         },
     )
+    record_sensitive_access(request, "case_created", case)
     return case
 
 
@@ -431,11 +432,14 @@ def case_list(request: HttpRequest) -> HttpResponse:
         cases = cases.filter(status=status)
     if risk:
         cases = cases.filter(risk_category__iexact=risk)
+    displayed_cases = list(cases[:250])
+    for case in displayed_cases:
+        record_sensitive_access(request, "case_listed", case)
     context = {
         "pages": PAGES,
         "active_page": "cases",
         "display_date": services.display_date(),
-        "cases": cases[:250],
+        "cases": displayed_cases,
         "query": query,
         "selected_status": status,
         "selected_risk": risk,
@@ -451,6 +455,7 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
         AssessmentCase.objects.select_related("created_by", "assigned_to"),
         id=case_id,
     )
+    record_sensitive_access(request, "case_viewed", case)
     can_review = user_role(request.user) in {"reviewer", "admin", "local"}
     form = CaseReviewForm(request.POST or None, instance=case)
     if request.method == "POST":
@@ -462,6 +467,7 @@ def case_detail(request: HttpRequest, case_id: uuid.UUID) -> HttpResponse:
             if request.user.is_authenticated and updated.assigned_to_id is None:
                 updated.assigned_to = request.user
             updated.save()
+            record_sensitive_access(request, "case_reviewed", updated)
             messages.success(request, "Review saved.")
             return redirect("case-detail", case_id=case.id)
 
@@ -499,13 +505,17 @@ def batch_upload(request: HttpRequest) -> HttpResponse:
 
     form = BatchUploadForm(request.POST or None, request.FILES or None)
     context["batch_form"] = form
-    context["recent_batches"] = BatchAssessment.objects.all()[:20]
+    recent_batches = list(BatchAssessment.objects.all()[:20])
+    for recent_batch in recent_batches:
+        record_sensitive_access(request, "batch_listed", recent_batch)
+    context["recent_batches"] = recent_batches
     if request.method == "POST" and form.is_valid():
         upload = form.cleaned_data["file"]
         batch = BatchAssessment.objects.create(
             created_by=_actor(request),
             file_name=upload.name,
         )
+        record_sensitive_access(request, "batch_created", batch)
         try:
             frame = services.read_batch_upload(upload)
             results: list[dict[str, object]] = []
@@ -585,6 +595,7 @@ def batch_upload(request: HttpRequest) -> HttpResponse:
 @access_required("analyst")
 def batch_detail(request: HttpRequest, batch_id: uuid.UUID) -> HttpResponse:
     batch = get_object_or_404(BatchAssessment, id=batch_id)
+    record_sensitive_access(request, "batch_viewed", batch)
     return render(
         request,
         "app/batch_detail.html",
@@ -607,6 +618,7 @@ def batch_template(request: HttpRequest) -> HttpResponse:
 @access_required("analyst")
 def batch_results(request: HttpRequest, batch_id: uuid.UUID) -> HttpResponse:
     batch = get_object_or_404(BatchAssessment, id=batch_id)
+    record_sensitive_access(request, "batch_results_exported", batch)
     response = HttpResponse(
         services.batch_results_csv(batch.results),
         content_type="text/csv",

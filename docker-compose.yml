@@ -1,10 +1,13 @@
 services:
   database:
     image: postgres:18-alpine
+    env_file:
+      - path: .env
+        required: false
     environment:
-      POSTGRES_DB: bankrisk
-      POSTGRES_USER: bankrisk
-      POSTGRES_PASSWORD: bankrisk
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env or your secret manager}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env or your secret manager}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env or your secret manager}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U bankrisk -d bankrisk"]
       interval: 5s
@@ -15,16 +18,38 @@ services:
 
   web:
     build: .
+    env_file:
+      - path: .env
+        required: false
     ports:
-      - "8000:8000"
-    environment:
-      DEBUG: "False"
-      SECRET_KEY: "local-docker-secret-change-before-sharing"
-      AUDIT_HMAC_KEY: "local-docker-audit-key-change-before-sharing"
-      DATABASE_URL: "postgresql://bankrisk:bankrisk@database:5432/bankrisk"
-      DB_SSL_REQUIRE: "False"
-      ALLOWED_HOSTS: "127.0.0.1,localhost"
-      LOGIN_REQUIRED: "False"
+      - "127.0.0.1:8000:8000"
+    environment: &application_environment
+      DEBUG: ${DEBUG:-False}
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env or your secret manager}
+      AUDIT_HMAC_KEY: ${AUDIT_HMAC_KEY:?set AUDIT_HMAC_KEY in .env or your secret manager}
+      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:?set FIELD_ENCRYPTION_KEY in .env or your secret manager}
+      BACKUP_ENCRYPTION_KEY: ${BACKUP_ENCRYPTION_KEY:?set BACKUP_ENCRYPTION_KEY in .env or your secret manager}
+      MODEL_SIGNING_PUBLIC_KEY: ${MODEL_SIGNING_PUBLIC_KEY:?set MODEL_SIGNING_PUBLIC_KEY in .env or your secret manager}
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env or your secret manager}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-127.0.0.1,localhost}
+      LOGIN_REQUIRED: ${LOGIN_REQUIRED:-True}
+      DATA_PROVENANCE_VERIFIED: ${DATA_PROVENANCE_VERIFIED:-False}
+      CASE_RETENTION_DAYS: ${CASE_RETENTION_DAYS:-365}
+      ACCESS_LOG_RETENTION_DAYS: ${ACCESS_LOG_RETENTION_DAYS:-365}
+      RETENTION_INTERVAL_SECONDS: ${RETENTION_INTERVAL_SECONDS:-86400}
+    depends_on:
+      database:
+        condition: service_healthy
+
+  retention:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    command: >
+      sh -c 'while true; do python manage.py purge_old_cases --confirm;
+      sleep "$${RETENTION_INTERVAL_SECONDS:-86400}"; done'
+    environment: *application_environment
     depends_on:
       database:
         condition: service_healthy

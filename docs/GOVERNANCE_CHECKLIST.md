@@ -1,7 +1,6 @@
 # Production Governance Checklist
 
-This checklist records controls that require organizational evidence rather than
-code alone. It is not legal advice.
+This checklist records controls that require organizational evidence rather than code alone. It is not legal advice.
 
 ## Data approval
 

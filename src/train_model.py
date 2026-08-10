@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
+import os
 import platform
 import subprocess
 from datetime import datetime, timezone
@@ -19,6 +21,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import sklearn
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
@@ -326,6 +329,41 @@ def git_is_dirty() -> bool | None:
         return None
 
 
+def git_release_tag() -> str:
+    """Return the single tag pointing at HEAD, refusing ambiguous releases."""
+    try:
+        tags = subprocess.check_output(
+            ["git", "tag", "--points-at", "HEAD"],
+            cwd=PROJECT_ROOT,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).splitlines()
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError("A release must be built from a tagged Git commit.") from exc
+    if len(tags) != 1:
+        raise RuntimeError("A release must be built from a commit with exactly one Git tag.")
+    return tags[0]
+
+
+def canonical_manifest(manifest: dict[str, Any]) -> bytes:
+    return json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def sign_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    encoded_key = os.getenv("MODEL_SIGNING_PRIVATE_KEY", "")
+    if not encoded_key:
+        raise RuntimeError("MODEL_SIGNING_PRIVATE_KEY must be supplied by the release secret manager.")
+    try:
+        private_key = Ed25519PrivateKey.from_private_bytes(base64.b64decode(encoded_key, validate=True))
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError("MODEL_SIGNING_PRIVATE_KEY must be a base64-encoded Ed25519 private key.") from exc
+    signed = dict(manifest)
+    signed["signature_algorithm"] = "ed25519"
+    signed["signing_key_id"] = os.getenv("MODEL_SIGNING_KEY_ID", "default")
+    signed["signature"] = base64.b64encode(private_key.sign(canonical_manifest(signed))).decode("ascii")
+    return signed
+
+
 def save_model_comparison_chart(results: pd.DataFrame) -> None:
     chart_data = results.set_index("model")[["accuracy", "precision", "recall", "f1_score", "roc_auc"]]
     ax = chart_data.plot(kind="bar", figsize=(11, 6), ylim=(0, 1), rot=0)
@@ -498,11 +536,16 @@ The model is a decision-support tool, not an autonomous approval system. The bus
     (REPORTS_DIR / "business_report.md").write_text(report, encoding="utf-8")
 
 
-def train_and_save(quick: bool = False, require_clean: bool = False) -> dict[str, Any]:
-    if require_clean and git_is_dirty():
+def train_and_save(quick: bool = False, require_clean: bool = False, release: bool = False) -> dict[str, Any]:
+    if not release:
+        raise RuntimeError("Refusing to overwrite a release artifact outside `--release` mode.")
+    if git_is_dirty() is not False:
         raise RuntimeError(
             "Refusing to produce a release artifact from a dirty Git worktree."
         )
+    if os.getenv("DATA_PROVENANCE_VERIFIED", "").lower() not in {"1", "true", "yes"}:
+        raise RuntimeError("Refusing to train a release from data without verified provenance approval.")
+    release_tag = git_release_tag()
     MODELS_DIR.mkdir(exist_ok=True)
     REPORTS_DIR.mkdir(exist_ok=True)
 
@@ -714,7 +757,9 @@ def train_and_save(quick: bool = False, require_clean: bool = False) -> dict[str
         "trained_at_utc": datetime.now(timezone.utc).isoformat(),
         "data_sha256": file_sha256(DATA_PATH),
         "git_commit": git_commit(),
-        "git_dirty": git_is_dirty(),
+        "git_dirty": False,
+        "git_tag": release_tag,
+        "data_provenance_verified": True,
         "split_sizes": split_sizes,
         "cost_assumptions": {
             "false_negative": FALSE_NEGATIVE_COST,
@@ -735,17 +780,31 @@ def train_and_save(quick: bool = False, require_clean: bool = False) -> dict[str
         },
     }
 
-    joblib.dump(bundle, MODEL_BUNDLE_PATH, compress=3)
-    MODEL_MANIFEST_PATH.write_text(
-        json.dumps(
-            {
+    # Release bundles are content-addressed and never overwritten. The manifest
+    # is signed only after the immutable artifact path and digest are known.
+    staging_path = MODELS_DIR / ".model-release-staging.pkl"
+    joblib.dump(bundle, staging_path, compress=3)
+    model_sha256 = file_sha256(staging_path)
+    release_path = MODELS_DIR / "releases" / model_sha256 / "model.pkl"
+    release_path.parent.mkdir(parents=True, exist_ok=True)
+    if release_path.exists():
+        if file_sha256(release_path) != model_sha256:
+            raise RuntimeError("Refusing to overwrite an existing immutable model release path.")
+        staging_path.unlink()
+    else:
+        staging_path.replace(release_path)
+    manifest = sign_manifest(
+        {
                 "model_version": MODEL_VERSION,
                 "model_name": model_name,
                 "trained_at_utc": bundle["trained_at_utc"],
-                "model_sha256": file_sha256(MODEL_BUNDLE_PATH),
+                "model_sha256": model_sha256,
+                "artifact_path": release_path.relative_to(MODELS_DIR).as_posix(),
                 "data_sha256": bundle["data_sha256"],
                 "git_commit": bundle["git_commit"],
                 "git_dirty": bundle["git_dirty"],
+                "git_tag": bundle["git_tag"],
+                "data_provenance_verified": True,
                 "split_sizes": bundle["split_sizes"],
                 "cost_assumptions": bundle["cost_assumptions"],
                 "risk_bands": bundle["risk_bands"],
@@ -754,15 +813,12 @@ def train_and_save(quick: bool = False, require_clean: bool = False) -> dict[str
                 "features": FEATURES,
                 "excluded_lender_assigned_features": EXCLUDED_LENDER_ASSIGNED_FEATURES,
                 "excluded_policy_features": EXCLUDED_POLICY_FEATURES,
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
+        }
     )
+    MODEL_MANIFEST_PATH.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
     return {
-        "model_path": str(MODEL_BUNDLE_PATH),
+        "model_path": str(release_path),
         "model_comparison": results,
         "default_metrics": final_metrics,
         "business_metrics": business_metrics,
@@ -779,6 +835,11 @@ def parse_args() -> argparse.Namespace:
         help="Use a smaller hyperparameter grid for faster local iteration.",
     )
     parser.add_argument(
+        "--release",
+        action="store_true",
+        help="Build a signed immutable release from a clean, tagged commit.",
+    )
+    parser.add_argument(
         "--require-clean",
         action="store_true",
         help="Fail when Git has uncommitted changes.",
@@ -788,7 +849,7 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
-    output = train_and_save(quick=args.quick, require_clean=args.require_clean)
+    output = train_and_save(quick=args.quick, require_clean=args.require_clean, release=args.release)
     print(f"Saved model bundle: {output['model_path']}")
     print(f"Business threshold: {output['business_threshold']:.2f}")
     print(f"Selected model: {output['model_name']}")

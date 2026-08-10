@@ -7,16 +7,18 @@ from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
+from joblib import load as load_joblib
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 
 from app import services
 from app.forms import ApplicantAssessmentForm
-from app.models import AssessmentCase, BatchAssessment, PredictionAudit
+from app.models import AssessmentCase, BatchAssessment, PredictionAudit, SensitiveDataAccessLog
 from src.train_model import (
     EXCLUDED_LENDER_ASSIGNED_FEATURES,
     FEATURES,
@@ -27,11 +29,16 @@ from src.train_model import (
 )
 
 
+def test_model_bundle() -> dict:
+    """A direct test fixture; production loading still verifies releases."""
+    return load_joblib(services.MODEL_PATH)
+
+
 class ApplicantAssessmentFormTests(SimpleTestCase):
     @classmethod
     def setUpClass(cls) -> None:
         super().setUpClass()
-        cls.bundle = services.load_model_bundle()
+        cls.bundle = test_model_bundle()
 
     def valid_payload(self) -> dict[str, str]:
         return {
@@ -97,7 +104,11 @@ class ServiceTests(SimpleTestCase):
     @classmethod
     def setUpClass(cls) -> None:
         super().setUpClass()
-        cls.bundle = services.load_model_bundle()
+        cls.bundle = test_model_bundle()
+
+    def test_unreleased_model_is_rejected_by_runtime_loader(self) -> None:
+        with self.assertRaises(services.ArtifactIntegrityError):
+            services.load_model_bundle()
 
     def test_bundle_has_governance_metadata(self) -> None:
         for key in (
@@ -206,6 +217,15 @@ class ServiceTests(SimpleTestCase):
 
 
 class DashboardViewTests(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.model_loader = patch("app.services.load_model_bundle", return_value=test_model_bundle())
+        self.data_loader = patch("app.services.load_credit_data", return_value=load_credit_data())
+        self.model_loader.start()
+        self.data_loader.start()
+        self.addCleanup(self.model_loader.stop)
+        self.addCleanup(self.data_loader.stop)
+
     def valid_payload(self) -> dict[str, str]:
         return {
             "person_age": "30",
@@ -286,6 +306,12 @@ class DashboardViewTests(TestCase):
         self.assertEqual(audit.digest_version, "hmac-sha256-v1")
         self.assertEqual(audit.model_version, "2.1.0")
         self.assertEqual(AssessmentCase.objects.count(), 1)
+        self.assertEqual(SensitiveDataAccessLog.objects.filter(action="case_created").count(), 1)
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT application_data FROM app_assessmentcase LIMIT 1")
+            stored_value = cursor.fetchone()[0]
+        self.assertNotIn("person_income", stored_value)
+        self.assertNotIn("65000", stored_value)
 
     def test_report_downloads_and_allowlist(self) -> None:
         self.assertEqual(self.client.get(reverse("download-summary-csv")).status_code, 200)

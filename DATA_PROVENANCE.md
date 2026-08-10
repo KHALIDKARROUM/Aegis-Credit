@@ -25,4 +25,7 @@ f56c566de00c25e0979a402afc57442fd20e1f4763cf16afc818bf35040df9ef
 ```
 
 Until the gate is completed, treat the file as demonstration data that is
-excluded from the project MIT license.
+excluded from the project MIT license. It must not be loaded for scoring,
+training, validation, reporting, or any other operational purpose. The
+application enforces this with `DATA_PROVENANCE_VERIFIED=False` by default;
+approval must be documented before that deployment setting can be changed.

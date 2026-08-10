@@ -14,7 +14,7 @@ text containing sensitive personal data in the application reference.
 
 ## Case review
 
-Reviewers can change status, add notes, and override the model recommendation.
+Reviewers can change status, add notes, and override the model recommendation. 
 An override reason is mandatory. The model output remains visible so the human
 decision can be audited without rewriting model history.
 

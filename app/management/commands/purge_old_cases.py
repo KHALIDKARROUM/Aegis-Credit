@@ -6,7 +6,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from app.models import AssessmentCase, BatchAssessment, PredictionAudit
+from app.models import AssessmentCase, BatchAssessment, PredictionAudit, SensitiveDataAccessLog
 
 
 class Command(BaseCommand):
@@ -39,6 +39,9 @@ class Command(BaseCommand):
             "batches": BatchAssessment.objects.filter(created_at__lt=cutoff),
             "audits": PredictionAudit.objects.filter(created_at__lt=cutoff).exclude(
                 request_id__in=held_request_ids
+            ),
+            "access_logs": SensitiveDataAccessLog.objects.filter(
+                created_at__lt=timezone.now() - timedelta(days=settings.ACCESS_LOG_RETENTION_DAYS)
             ),
         }
         counts = {name: queryset.count() for name, queryset in querysets.items()}

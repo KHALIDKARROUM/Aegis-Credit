@@ -5,6 +5,8 @@ import uuid
 from django.conf import settings
 from django.db import models
 
+from .fields import EncryptedJSONField, EncryptedTextField
+
 
 class PredictionAudit(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
@@ -72,23 +74,23 @@ class AssessmentCase(models.Model):
         default=Status.NEW,
         db_index=True,
     )
-    application_data = models.JSONField(default=dict)
+    application_data = EncryptedJSONField(default=dict)
     probability = models.FloatField()
     threshold = models.FloatField()
     risk_category = models.CharField(max_length=16)
     screening_result = models.CharField(max_length=120)
     recommendation = models.CharField(max_length=120)
     model_version = models.CharField(max_length=32)
-    explanation_rows = models.JSONField(default=list)
+    explanation_rows = EncryptedJSONField(default=list)
     explanation_method = models.CharField(max_length=255, blank=True)
-    warnings = models.JSONField(default=list)
-    reviewer_notes = models.TextField(blank=True)
+    warnings = EncryptedJSONField(default=list)
+    reviewer_notes = EncryptedTextField(blank=True)
     override_decision = models.CharField(
         max_length=32,
         choices=OverrideDecision.choices,
         blank=True,
     )
-    override_reason = models.TextField(blank=True)
+    override_reason = EncryptedTextField(blank=True)
     legal_hold = models.BooleanField(default=False)
     reviewed_at = models.DateTimeField(blank=True, null=True)
 
@@ -136,10 +138,40 @@ class BatchAssessment(models.Model):
     total_rows = models.PositiveIntegerField(default=0)
     valid_rows = models.PositiveIntegerField(default=0)
     invalid_rows = models.PositiveIntegerField(default=0)
-    results = models.JSONField(default=list)
+    results = EncryptedJSONField(default=list)
 
     class Meta:
         ordering = ["-created_at"]
 
     def __str__(self) -> str:
         return f"{self.file_name}: {self.get_status_display()}"
+
+
+class SensitiveDataAccessLog(models.Model):
+    """Append-only audit metadata for accesses to retained applicant records."""
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="sensitive_data_accesses",
+    )
+    action = models.CharField(max_length=64)
+    object_type = models.CharField(max_length=32)
+    object_id = models.CharField(max_length=64)
+    ip_address = models.GenericIPAddressField(blank=True, null=True)
+    user_agent = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["object_type", "object_id", "-created_at"],
+                name="app_sensiti_object__941965_idx",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.action} {self.object_type}/{self.object_id}"

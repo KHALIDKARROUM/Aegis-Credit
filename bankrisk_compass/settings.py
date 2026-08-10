@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from cryptography.fernet import Fernet
 from django.core.exceptions import ImproperlyConfigured
 
 
@@ -19,10 +20,26 @@ def env_list(name: str, default: str = "") -> list[str]:
     return [value.strip() for value in os.getenv(name, default).split(",") if value.strip()]
 
 
-DEBUG = env_bool("DEBUG", True)
-SECRET_KEY = os.getenv("SECRET_KEY", "bankrisk-compass-local-development-key")
-if not DEBUG and SECRET_KEY == "bankrisk-compass-local-development-key":
-    raise ImproperlyConfigured("SECRET_KEY must be set when DEBUG=False.")
+DEBUG = env_bool("DEBUG", False)
+
+
+def required_env(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if not value:
+        raise ImproperlyConfigured(f"{name} must be supplied by the environment or a secret manager.")
+    return value
+
+
+SECRET_KEY = required_env("SECRET_KEY")
+AUDIT_HMAC_KEY = required_env("AUDIT_HMAC_KEY")
+FIELD_ENCRYPTION_KEY = required_env("FIELD_ENCRYPTION_KEY")
+MODEL_SIGNING_PUBLIC_KEY = required_env("MODEL_SIGNING_PUBLIC_KEY")
+BACKUP_ENCRYPTION_KEY = required_env("BACKUP_ENCRYPTION_KEY")
+try:
+    Fernet(FIELD_ENCRYPTION_KEY.encode("ascii"))
+    Fernet(BACKUP_ENCRYPTION_KEY.encode("ascii"))
+except (ValueError, UnicodeEncodeError) as exc:
+    raise ImproperlyConfigured("FIELD_ENCRYPTION_KEY and BACKUP_ENCRYPTION_KEY must be valid Fernet keys.") from exc
 
 ALLOWED_HOSTS = env_list(
     "ALLOWED_HOSTS",
@@ -126,9 +143,10 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 X_FRAME_OPTIONS = "DENY"
 SCORING_API_KEY = os.getenv("SCORING_API_KEY", "")
-AUDIT_HMAC_KEY = os.getenv("AUDIT_HMAC_KEY", SECRET_KEY)
-LOGIN_REQUIRED = env_bool("LOGIN_REQUIRED", not DEBUG)
+LOGIN_REQUIRED = env_bool("LOGIN_REQUIRED", True)
+DATA_PROVENANCE_VERIFIED = env_bool("DATA_PROVENANCE_VERIFIED", False)
 CASE_RETENTION_DAYS = int(os.getenv("CASE_RETENTION_DAYS", "365"))
+ACCESS_LOG_RETENTION_DAYS = int(os.getenv("ACCESS_LOG_RETENTION_DAYS", str(CASE_RETENTION_DAYS)))
 MAX_BATCH_ROWS = int(os.getenv("MAX_BATCH_ROWS", "1000"))
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
 API_RATE_LIMIT_PER_MINUTE = int(os.getenv("API_RATE_LIMIT_PER_MINUTE", "60"))
