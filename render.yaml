@@ -1,20 +1,20 @@
 databases:
-  - name: bankrisk-compass-db
+  - name: aegis-credit-db
     plan: basic-256mb
     region: frankfurt
-    databaseName: bankrisk_compass
-    user: bankrisk_compass
+    databaseName: aegis_credit
+    user: aegis_credit
     ipAllowList: []
 
 services:
   - type: web
-    name: bankrisk-compass
+    name: aegis-credit
     runtime: python
     plan: starter
     region: frankfurt
     buildCommand: bash build.sh
     preDeployCommand: python manage.py migrate --no-input && python manage.py bootstrap_roles
-    startCommand: gunicorn bankrisk_compass.wsgi:application --workers 2 --threads 2 --timeout 120
+    startCommand: gunicorn aegis_credit.wsgi:application --workers 2 --threads 2 --timeout 120
     healthCheckPath: /readyz/
     envVars:
       - key: PYTHON_VERSION
@@ -43,7 +43,7 @@ services:
         sync: false
       - key: DATABASE_URL
         fromDatabase:
-          name: bankrisk-compass-db
+          name: aegis-credit-db
           property: connectionString
       - key: DB_SSL_REQUIRE
         value: "True"
@@ -95,7 +95,7 @@ services:
         sync: false
 
   - type: worker
-    name: bankrisk-compass-batch-worker
+    name: aegis-credit-batch-worker
     runtime: python
     plan: starter
     region: frankfurt
@@ -120,41 +120,41 @@ services:
       - key: SECRET_KEY
         fromService:
           type: web
-          name: bankrisk-compass
+          name: aegis-credit
           envVarKey: SECRET_KEY
       - key: AUDIT_HMAC_KEY
         fromService:
           type: web
-          name: bankrisk-compass
+          name: aegis-credit
           envVarKey: AUDIT_HMAC_KEY
       - key: AUDIT_HMAC_KEYS
         fromService:
           type: web
-          name: bankrisk-compass
+          name: aegis-credit
           envVarKey: AUDIT_HMAC_KEYS
       - key: FIELD_ENCRYPTION_KEY
         fromService:
           type: web
-          name: bankrisk-compass
+          name: aegis-credit
           envVarKey: FIELD_ENCRYPTION_KEY
       - key: FIELD_ENCRYPTION_KEYS
         fromService:
           type: web
-          name: bankrisk-compass
+          name: aegis-credit
           envVarKey: FIELD_ENCRYPTION_KEYS
       - key: BACKUP_ENCRYPTION_KEY
         fromService:
           type: web
-          name: bankrisk-compass
+          name: aegis-credit
           envVarKey: BACKUP_ENCRYPTION_KEY
       - key: MODEL_SIGNING_PUBLIC_KEY
         fromService:
           type: web
-          name: bankrisk-compass
+          name: aegis-credit
           envVarKey: MODEL_SIGNING_PUBLIC_KEY
       - key: DATABASE_URL
         fromDatabase:
-          name: bankrisk-compass-db
+          name: aegis-credit-db
           property: connectionString
       - key: DB_SSL_REQUIRE
         value: "True"
@@ -176,7 +176,7 @@ services:
         value: "3"
 
   - type: cron
-    name: bankrisk-compass-retention
+    name: aegis-credit-retention
     runtime: python
     plan: starter
     region: frankfurt
@@ -199,51 +199,51 @@ services:
       - key: SECRET_KEY
         fromService:
           type: web
-          name: bankrisk-compass
+          name: aegis-credit
           envVarKey: SECRET_KEY
       - key: AUDIT_HMAC_KEY
         fromService:
           type: web
-          name: bankrisk-compass
+          name: aegis-credit
           envVarKey: AUDIT_HMAC_KEY
       - key: AUDIT_HMAC_KEYS
         fromService:
           type: web
-          name: bankrisk-compass
+          name: aegis-credit
           envVarKey: AUDIT_HMAC_KEYS
       - key: FIELD_ENCRYPTION_KEY
         fromService:
           type: web
-          name: bankrisk-compass
+          name: aegis-credit
           envVarKey: FIELD_ENCRYPTION_KEY
       - key: FIELD_ENCRYPTION_KEYS
         fromService:
           type: web
-          name: bankrisk-compass
+          name: aegis-credit
           envVarKey: FIELD_ENCRYPTION_KEYS
       - key: BACKUP_ENCRYPTION_KEY
         fromService:
           type: web
-          name: bankrisk-compass
+          name: aegis-credit
           envVarKey: BACKUP_ENCRYPTION_KEY
       - key: MODEL_SIGNING_PUBLIC_KEY
         fromService:
           type: web
-          name: bankrisk-compass
+          name: aegis-credit
           envVarKey: MODEL_SIGNING_PUBLIC_KEY
       - key: DATABASE_URL
         fromDatabase:
-          name: bankrisk-compass-db
+          name: aegis-credit-db
           property: connectionString
       - key: DB_SSL_REQUIRE
         value: "True"
       - key: CASE_RETENTION_DAYS
         fromService:
           type: web
-          name: bankrisk-compass
+          name: aegis-credit
           envVarKey: CASE_RETENTION_DAYS
       - key: ACCESS_LOG_RETENTION_DAYS
         fromService:
           type: web
-          name: bankrisk-compass
+          name: aegis-credit
           envVarKey: ACCESS_LOG_RETENTION_DAYS

@@ -1,4 +1,4 @@
-"""URL configuration for BankRisk Compass."""
+"""URL configuration for Aegis-Credit."""
 
 from __future__ import annotations
 

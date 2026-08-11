@@ -28,7 +28,7 @@ class Command(BaseCommand):
         destination = Path(options["destination"]).resolve()
         destination.mkdir(parents=True, exist_ok=True, mode=0o700)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-        output = destination / f"bankrisk-{timestamp}.dump.brc"
+        output = destination / f"aegis-credit-{timestamp}.dump.brc"
         temporary_output = destination / f".{output.name}.{secrets.token_hex(8)}.tmp"
         command = [
             "pg_dump",

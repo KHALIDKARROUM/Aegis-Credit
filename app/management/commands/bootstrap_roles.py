@@ -8,7 +8,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 
 class Command(BaseCommand):
-    help = "Create BankRisk Compass roles and optionally bootstrap an administrator."
+    help = "Create Aegis-Credit roles and optionally bootstrap an administrator."
 
     def handle(self, *args, **options):
         groups = {

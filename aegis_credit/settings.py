@@ -1,4 +1,4 @@
-"""Django settings for the BankRisk Compass dashboard."""
+"""Django settings for the Aegis-Credit dashboard."""
 
 from __future__ import annotations
 
@@ -215,7 +215,7 @@ MIDDLEWARE = [
 if not DEBUG:
     MIDDLEWARE.insert(1, "whitenoise.middleware.WhiteNoiseMiddleware")
 
-ROOT_URLCONF = "bankrisk_compass.urls"
+ROOT_URLCONF = "aegis_credit.urls"
 
 TEMPLATES = [
     {
@@ -234,7 +234,7 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = "bankrisk_compass.wsgi.application"
+WSGI_APPLICATION = "aegis_credit.wsgi.application"
 
 DATABASES = {
     "default": {
@@ -414,7 +414,7 @@ CACHES = {
             "CACHE_BACKEND",
             "django.core.cache.backends.locmem.LocMemCache",
         ),
-        "LOCATION": os.getenv("CACHE_LOCATION", "bankrisk-compass"),
+        "LOCATION": os.getenv("CACHE_LOCATION", "aegis-credit"),
     }
 }
 

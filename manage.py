@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Django management entry point for BankRisk Compass."""
+"""Django management entry point for Aegis-Credit."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import sys
 
 
 def main() -> None:
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "bankrisk_compass.settings")
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "aegis_credit.settings")
 
     from django.core.management import execute_from_command_line
 

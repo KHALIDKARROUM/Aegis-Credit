@@ -32,7 +32,7 @@ python run.py --check
 
 This applies migrations, bootstraps roles, and runs Django checks with the
 stable local keys. For deeper `manage.py` diagnostics, first load
-`.bankrisk-local.env` as shown in the README developer setup; direct management
+`.aegis-credit-local.env` as shown in the README developer setup; direct management
 commands intentionally fail when mandatory secrets are absent.
 
 An integrity failure means the model file and manifest do not match. Regenerate
@@ -41,7 +41,7 @@ both together with the training command; do not bypass the check.
 ## Docker does not start
 
 - Start Docker Desktop and wait for its engine to report ready.
-- Run `docker compose --env-file .bankrisk-docker.env config` after using the
+- Run `docker compose --env-file .aegis-credit-docker.env config` after using the
   Docker launcher, or provide the required secrets through `.env`/your secret
   manager before running `docker compose config` directly.
 - Inspect with `docker compose logs web database`.

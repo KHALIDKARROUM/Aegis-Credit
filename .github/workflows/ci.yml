@@ -15,13 +15,13 @@ jobs:
       postgres:
         image: postgres:18-alpine
         env:
-          POSTGRES_DB: bankrisk_ci
-          POSTGRES_USER: bankrisk_ci
+          POSTGRES_DB: aegis_credit_ci
+          POSTGRES_USER: aegis_credit_ci
           POSTGRES_PASSWORD: ci-database-password
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U bankrisk_ci -d bankrisk_ci"
+          --health-cmd "pg_isready -U aegis_credit_ci -d aegis_credit_ci"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
@@ -29,10 +29,10 @@ jobs:
       DEBUG: "True"
       LOGIN_REQUIRED: "False"
       LOCAL_DEMO_MODE: "False"
-      DATABASE_URL: postgresql://bankrisk_ci:ci-database-password@127.0.0.1:5432/bankrisk_ci
+      DATABASE_URL: postgresql://aegis_credit_ci:ci-database-password@127.0.0.1:5432/aegis_credit_ci
       DB_SSL_REQUIRE: "False"
-      POSTGRES_DB: bankrisk_ci
-      POSTGRES_USER: bankrisk_ci
+      POSTGRES_DB: aegis_credit_ci
+      POSTGRES_USER: aegis_credit_ci
       POSTGRES_PASSWORD: ci-database-password
 
     steps:
@@ -62,7 +62,7 @@ jobs:
         run: python -m pip check
 
       - name: Compile Python
-        run: python -m compileall -q app bankrisk_compass src
+        run: python -m compileall -q app aegis_credit src
 
       - name: Validate deployment configuration
         run: |

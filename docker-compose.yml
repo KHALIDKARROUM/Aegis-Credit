@@ -57,7 +57,7 @@ services:
       retries: 12
     restart: unless-stopped
     volumes:
-      - bankrisk_postgres:/var/lib/postgresql/data
+      - aegis_credit_postgres:/var/lib/postgresql/data
 
   migrate:
     build: .
@@ -90,7 +90,7 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     volumes:
-      - bankrisk_media:/app/media
+      - aegis_credit_media:/app/media
 
   batch-worker:
     build: .
@@ -102,7 +102,7 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     volumes:
-      - bankrisk_media:/app/media
+      - aegis_credit_media:/app/media
 
   retention:
     build: .
@@ -121,8 +121,8 @@ services:
         condition: service_completed_successfully
     restart: "on-failure:5"
     volumes:
-      - bankrisk_media:/app/media
+      - aegis_credit_media:/app/media
 
 volumes:
-  bankrisk_postgres:
-  bankrisk_media:
+  aegis_credit_postgres:
+  aegis_credit_media:

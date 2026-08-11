@@ -1,1 +1,1 @@
-"""BankRisk Compass package."""
+"""Aegis-Credit package."""

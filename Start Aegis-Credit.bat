@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-title BankRisk Compass
+title Aegis-Credit
 
 where py >nul 2>nul
 if not errorlevel 1 (

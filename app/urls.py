@@ -10,6 +10,7 @@ urlpatterns = [
     path("readyz/", views.readiness, name="readiness"),
     path("api/v1/score/", views.score_api, name="score-api"),
     path("api/v1/openapi.json", views.openapi_json, name="openapi-json"),
+    path("api/docs/reference.pdf", views.download_api_reference_pdf, name="download-api-reference-pdf"),
     path("api/docs/", views.api_docs, name="api-docs"),
     path("", views.assessment, name="assessment"),
     path("assessment/", views.assessment, name="assessment-legacy"),

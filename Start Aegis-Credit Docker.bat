@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-title BankRisk Compass - Docker
+title Aegis-Credit - Docker
 
 where docker >nul 2>nul
 if errorlevel 1 (
@@ -18,7 +18,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Building and starting BankRisk Compass with PostgreSQL...
+echo Building and starting Aegis-Credit with PostgreSQL...
 where py >nul 2>nul
 if not errorlevel 1 (
     py -3 run.py docker-env
@@ -31,6 +31,6 @@ if errorlevel 1 (
     exit /b 1
 )
 start "" /b powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 8; Start-Process 'http://127.0.0.1:8000/'"
-docker compose --env-file .bankrisk-docker.env up --build
+docker compose --env-file .aegis-credit-docker.env up --build
 
 endlocal

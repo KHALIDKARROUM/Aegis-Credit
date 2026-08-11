@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Start BankRisk Compass locally with one command.
+"""Start Aegis-Credit locally with one command.
 
 Run ``python run.py`` (or ``py run.py`` on Windows).  The script keeps all
-local-only configuration in ``.bankrisk-local.env`` so encryption keys stay
+local-only configuration in ``.aegis-credit-local.env`` so encryption keys stay
 stable between launches and existing local cases remain readable.
 """
 
@@ -24,9 +24,9 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent
 VENV_DIR = PROJECT_ROOT / ".venv"
 REQUIREMENTS = PROJECT_ROOT / "requirements-app.txt"
-LOCAL_ENV = PROJECT_ROOT / ".bankrisk-local.env"
-DOCKER_ENV = PROJECT_ROOT / ".bankrisk-docker.env"
-REQUIREMENTS_MARKER = VENV_DIR / ".bankrisk-requirements.sha256"
+LOCAL_ENV = PROJECT_ROOT / ".aegis-credit-local.env"
+DOCKER_ENV = PROJECT_ROOT / ".aegis-credit-docker.env"
+REQUIREMENTS_MARKER = VENV_DIR / ".aegis-credit-requirements.sha256"
 
 
 def venv_python() -> Path:
@@ -37,7 +37,7 @@ def venv_python() -> Path:
 def require_supported_python() -> None:
     if sys.version_info < (3, 12):
         raise SystemExit(
-            "BankRisk Compass requires Python 3.12 or newer. "
+            "Aegis-Credit requires Python 3.12 or newer. "
             "Install a supported Python version and run this command again."
         )
 
@@ -125,7 +125,7 @@ def create_local_environment() -> dict[str, str]:
         )
         contents = header + "".join(f"{name}={value}\n" for name, value in sorted(values.items()))
         LOCAL_ENV.write_text(contents, encoding="utf-8")
-        print("Created local development settings in .bankrisk-local.env.")
+        print("Created local development settings in .aegis-credit-local.env.")
     if os.name != "nt":
         LOCAL_ENV.chmod(stat.S_IRUSR | stat.S_IWUSR)
     return values
@@ -148,8 +148,8 @@ def create_local_docker_environment() -> dict[str, str]:
         "FIELD_ENCRYPTION_KEY": fernet_key(),
         "BACKUP_ENCRYPTION_KEY": fernet_key(),
         "MODEL_SIGNING_PUBLIC_KEY": base64.b64encode(os.urandom(32)).decode("ascii"),
-        "POSTGRES_DB": "bankrisk",
-        "POSTGRES_USER": "bankrisk",
+        "POSTGRES_DB": "aegis_credit",
+        "POSTGRES_USER": "aegis_credit",
         "POSTGRES_PASSWORD": secrets.token_urlsafe(32),
         "DB_SSL_REQUIRE": "False",
         "SCORING_API_KEY": "",
@@ -214,7 +214,7 @@ def command_environment() -> dict[str, str]:
     # This is a local-only launcher. Its saved configuration deliberately wins
     # over ambient CI/editor variables (for example DEBUG=release), which could
     # otherwise make a development server look for a production static manifest.
-    # Edit .bankrisk-local.env when an intentional local override is needed.
+    # Edit .aegis-credit-local.env when an intentional local override is needed.
     environment = os.environ.copy()
     environment.update(create_local_environment())
     return environment
@@ -225,7 +225,7 @@ def run_manage(python: Path, environment: dict[str, str], *arguments: str) -> No
 
 
 def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run BankRisk Compass locally.")
+    parser = argparse.ArgumentParser(description="Run Aegis-Credit locally.")
     parser.add_argument("--host", default="127.0.0.1", help="Address to bind (default: 127.0.0.1).")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind (default: 8000).")
     parser.add_argument("--no-browser", action="store_true", help="Do not open the local URL in a browser.")
@@ -268,11 +268,11 @@ def main() -> None:
     run_manage(python, environment, "bootstrap_roles")
     if args.check:
         run_manage(python, environment, "check")
-        print("BankRisk Compass is ready to start with: python run.py")
+        print("Aegis-Credit is ready to start with: python run.py")
         return
 
     url = f"http://{args.host}:{args.port}/"
-    print(f"\nBankRisk Compass is running at {url}")
+    print(f"\nAegis-Credit is running at {url}")
     print("Press Ctrl+C to stop it.\n")
     if not args.no_browser:
         threading.Timer(1.0, webbrowser.open, args=(url,)).start()
@@ -280,7 +280,7 @@ def main() -> None:
     try:
         run_manage(python, environment, "runserver", f"{args.host}:{args.port}")
     except KeyboardInterrupt:
-        print("\nBankRisk Compass stopped.")
+        print("\nAegis-Credit stopped.")
 
 
 if __name__ == "__main__":

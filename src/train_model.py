@@ -618,7 +618,7 @@ def write_business_report(
     threshold_row: pd.Series,
     split_sizes: dict[str, int],
 ) -> None:
-    report = f"""# BankRisk Compass Final Report
+    report = f"""# Aegis-Credit Final Report
 
 ## Final Model
 
@@ -1019,7 +1019,7 @@ def train_and_save(quick: bool = False, require_clean: bool = False, release: bo
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train the BankRisk Compass model.")
+    parser = argparse.ArgumentParser(description="Train the Aegis-Credit model.")
     parser.add_argument(
         "--quick",
         action="store_true",

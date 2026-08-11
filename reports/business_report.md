@@ -1,4 +1,4 @@
-# BankRisk Compass Final Report
+# Aegis-Credit Final Report
 
 ## Final Model
 

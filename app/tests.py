@@ -358,6 +358,13 @@ class DashboardViewTests(TestCase):
             404,
         )
 
+    def test_api_reference_pdf_download(self) -> None:
+        response = self.client.get(reverse("download-api-reference-pdf"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn("vantage-risk-scoring-api-reference.pdf", response["Content-Disposition"])
+        self.assertTrue(response.content.startswith(b"%PDF-"))
+
     def test_model_manifest_matches_bundle(self) -> None:
         manifest = json.loads((services.PROJECT_ROOT / "models" / "model_manifest.json").read_text())
         bundle = services.load_model_bundle()

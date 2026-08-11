@@ -8,7 +8,7 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install --no-install-recommends -y postgresql-client && \
     rm -rf /var/lib/apt/lists/* && \
-    addgroup --system bankrisk && adduser --system --ingroup bankrisk bankrisk
+    addgroup --system aegis_credit && adduser --system --ingroup aegis_credit aegis_credit
 
 COPY requirements-prod.txt .
 RUN python -m pip install --upgrade pip && \
@@ -21,9 +21,9 @@ RUN BUILD_FERNET_KEY="$(python -c 'from cryptography.fernet import Fernet; print
     FIELD_ENCRYPTION_KEY="$BUILD_FERNET_KEY" BACKUP_ENCRYPTION_KEY="$BUILD_FERNET_KEY" \
     MODEL_SIGNING_PUBLIC_KEY="$(python -c 'import base64, os; print(base64.b64encode(os.urandom(32)).decode())')" \
     python manage.py collectstatic --no-input && \
-    chown -R bankrisk:bankrisk /app
+    chown -R aegis_credit:aegis_credit /app
 
-USER bankrisk
+USER aegis_credit
 EXPOSE 8000
 
 CMD ["sh", "/app/docker-entrypoint.sh"]

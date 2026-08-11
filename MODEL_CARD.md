@@ -1,4 +1,4 @@
-# BankRisk Compass Model Card
+# Aegis-Credit Model Card
 
 ## Identity
 

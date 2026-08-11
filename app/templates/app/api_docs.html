@@ -9,7 +9,7 @@
         <h1>Scoring API</h1>
         <p>Human-readable reference for authenticated, rate-limited, idempotent screening.</p>
     </div>
-    <a class="secondary-button" href="{% url 'openapi-json' %}">Download OpenAPI JSON</a>
+    <a class="download-button" href="{% url 'download-api-reference-pdf' %}">Download API reference PDF</a>
 </section>
 
 <section class="status-banner {% if api_enabled %}success{% else %}neutral{% endif %}" role="status">
@@ -19,7 +19,7 @@
 
 <section class="note-panel">
     <strong>Documentation format:</strong>
-    This page is a static quick reference, not an interactive API console. Import the OpenAPI JSON into an approved OpenAPI viewer or client generator when interactive exploration is required.
+    This page and the PDF are human-readable references, not an interactive API console. <a class="inline-link" href="{% url 'openapi-json' %}">Open the machine-readable OpenAPI JSON</a> in an approved viewer or client generator when interactive exploration is required.
 </section>
 
 <section class="dashboard-grid split">

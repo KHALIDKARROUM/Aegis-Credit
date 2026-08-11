@@ -91,8 +91,8 @@ without changing a database, then restore only to an empty, isolated database
 whose configured name is supplied explicitly:
 
 ```bash
-python manage.py restore_database --backup /secure/backups/bankrisk-TIMESTAMP.dump.brc
-python manage.py restore_database --backup /secure/backups/bankrisk-TIMESTAMP.dump.brc \
+python manage.py restore_database --backup /secure/backups/aegis-credit-TIMESTAMP.dump.brc
+python manage.py restore_database --backup /secure/backups/aegis-credit-TIMESTAMP.dump.brc \
   --confirm-database isolated_restore_database
 ```
 

@@ -20,26 +20,26 @@ from app.backup import (
     encrypt_stream,
     postgres_connection,
 )
-from bankrisk_compass import settings as project_settings
+from aegis_credit import settings as project_settings
 
 
 class EnvironmentSettingTests(SimpleTestCase):
     def test_boolean_parser_uses_default_for_missing_or_blank_values(self) -> None:
         with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("BANKRISK_TEST_BOOLEAN", None)
-            self.assertTrue(project_settings.env_bool("BANKRISK_TEST_BOOLEAN", True))
-        with patch.dict(os.environ, {"BANKRISK_TEST_BOOLEAN": "   "}, clear=False):
-            self.assertFalse(project_settings.env_bool("BANKRISK_TEST_BOOLEAN", False))
+            os.environ.pop("AEGIS_CREDIT_TEST_BOOLEAN", None)
+            self.assertTrue(project_settings.env_bool("AEGIS_CREDIT_TEST_BOOLEAN", True))
+        with patch.dict(os.environ, {"AEGIS_CREDIT_TEST_BOOLEAN": "   "}, clear=False):
+            self.assertFalse(project_settings.env_bool("AEGIS_CREDIT_TEST_BOOLEAN", False))
 
     def test_boolean_parser_rejects_a_typo(self) -> None:
-        with patch.dict(os.environ, {"BANKRISK_TEST_BOOLEAN": "treu"}, clear=False):
+        with patch.dict(os.environ, {"AEGIS_CREDIT_TEST_BOOLEAN": "treu"}, clear=False):
             with self.assertRaises(ImproperlyConfigured):
-                project_settings.env_bool("BANKRISK_TEST_BOOLEAN")
+                project_settings.env_bool("AEGIS_CREDIT_TEST_BOOLEAN")
 
     def test_integer_parser_enforces_its_lower_bound(self) -> None:
-        with patch.dict(os.environ, {"BANKRISK_TEST_INTEGER": "0"}, clear=False):
+        with patch.dict(os.environ, {"AEGIS_CREDIT_TEST_INTEGER": "0"}, clear=False):
             with self.assertRaises(ImproperlyConfigured):
-                project_settings.env_int("BANKRISK_TEST_INTEGER", 10, minimum=1)
+                project_settings.env_int("AEGIS_CREDIT_TEST_INTEGER", 10, minimum=1)
 
     def test_database_tls_preserves_verification_and_rejects_downgrades(self) -> None:
         database = {"OPTIONS": {"sslmode": "verify-full"}}
@@ -62,7 +62,7 @@ class EnvironmentSettingTests(SimpleTestCase):
         with patch.dict(
             os.environ,
             {
-                "BANKRISK_TEST_API_KEYS": (
+                "AEGIS_CREDIT_TEST_API_KEYS": (
                     '{"underwriter-app":"' + first_secret + '",'
                     '"batch.v2":"' + second_secret + '"}'
                 )
@@ -70,7 +70,7 @@ class EnvironmentSettingTests(SimpleTestCase):
             clear=False,
         ):
             self.assertEqual(
-                project_settings.env_secret_mapping("BANKRISK_TEST_API_KEYS"),
+                project_settings.env_secret_mapping("AEGIS_CREDIT_TEST_API_KEYS"),
                 {"underwriter-app": first_secret, "batch.v2": second_secret},
             )
 
@@ -84,11 +84,11 @@ class EnvironmentSettingTests(SimpleTestCase):
         for value in invalid_values:
             with self.subTest(value=value), patch.dict(
                 os.environ,
-                {"BANKRISK_TEST_API_KEYS": value},
+                {"AEGIS_CREDIT_TEST_API_KEYS": value},
                 clear=False,
             ):
                 with self.assertRaises(ImproperlyConfigured):
-                    project_settings.env_secret_mapping("BANKRISK_TEST_API_KEYS")
+                    project_settings.env_secret_mapping("AEGIS_CREDIT_TEST_API_KEYS")
 
     def test_legacy_scoring_key_is_exposed_as_an_attributed_client(self) -> None:
         legacy_secret = "l" * 32
@@ -188,7 +188,7 @@ class LocalLauncherTests(SimpleTestCase):
 
     def test_local_environment_file_is_stable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / ".bankrisk-local.env"
+            path = Path(directory) / ".aegis-credit-local.env"
             with patch.object(launcher, "LOCAL_ENV", path):
                 first = launcher.create_local_environment()
                 second = launcher.create_local_environment()
@@ -197,7 +197,7 @@ class LocalLauncherTests(SimpleTestCase):
 
     def test_docker_environment_is_local_only_and_stable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / ".bankrisk-docker.env"
+            path = Path(directory) / ".aegis-credit-docker.env"
             with patch.object(launcher, "DOCKER_ENV", path):
                 first = launcher.create_local_docker_environment()
                 second = launcher.create_local_docker_environment()
@@ -218,7 +218,7 @@ class EncryptedBackupTests(SimpleTestCase):
     def test_database_password_is_kept_out_of_process_arguments(self) -> None:
         database = {
             "ENGINE": "django.db.backends.postgresql",
-            "NAME": "bankrisk",
+            "NAME": "aegis_credit",
             "USER": "backup_user",
             "PASSWORD": "do-not-put-this-in-argv",
             "HOST": "database",
@@ -234,7 +234,7 @@ class EncryptedBackupTests(SimpleTestCase):
 
     def test_streaming_backup_round_trip_and_tamper_detection(self) -> None:
         key = backup_key()
-        plaintext = (b"bankrisk-test-row\n" * 100_000) + b"done"
+        plaintext = (b"aegis-credit-test-row\n" * 100_000) + b"done"
         encrypted = io.BytesIO()
         encrypt_stream(io.BytesIO(plaintext), encrypted, key)
 
@@ -263,7 +263,7 @@ class EncryptedBackupTests(SimpleTestCase):
         process = MagicMock()
         process.stdout = io.BytesIO(b"postgres-custom-format-dump")
         process.wait.return_value = 0
-        connection = PostgresConnection("bankrisk", (), {"PATH": os.environ.get("PATH", "")})
+        connection = PostgresConnection("aegis_credit", (), {"PATH": os.environ.get("PATH", "")})
         with tempfile.TemporaryDirectory() as directory, patch(
             "app.management.commands.backup_database.backup_key",
             return_value=key,

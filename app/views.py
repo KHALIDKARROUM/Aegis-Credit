@@ -112,7 +112,7 @@ def assessment_context() -> tuple[dict[str, object], dict[str, object] | None]:
                     "error_title": "Scoring is disabled for this demonstration project",
                     "error_message": (
                         "The bundled dataset and model have not been approved for operational use, "
-                        "so BankRisk Compass will not produce loan-risk scores."
+                        "so Aegis-Credit will not produce loan-risk scores."
                     ),
                     "error_guidance": (
                         "This is expected in a local checkout. Scoring can only be enabled with an "
@@ -492,7 +492,7 @@ def download_summary_csv(request: HttpRequest) -> HttpResponse:
         raise Http404("Report summary is unavailable.")
 
     response = HttpResponse(services.summary_csv(dashboard), content_type="text/csv")
-    response["Content-Disposition"] = 'attachment; filename="bankrisk_summary.csv"'
+    response["Content-Disposition"] = 'attachment; filename="aegis_credit_summary.csv"'
     return response
 
 
@@ -503,7 +503,7 @@ def download_summary_pdf(request: HttpRequest) -> HttpResponse:
         raise Http404("Report summary is unavailable.")
 
     response = HttpResponse(services.summary_pdf(dashboard), content_type="application/pdf")
-    response["Content-Disposition"] = 'attachment; filename="bankrisk_summary.pdf"'
+    response["Content-Disposition"] = 'attachment; filename="aegis_credit_summary.pdf"'
     return response
 
 
@@ -960,7 +960,7 @@ def batch_retry(request: HttpRequest, batch_id: uuid.UUID) -> HttpResponse:
 @access_required("analyst")
 def batch_template(request: HttpRequest) -> HttpResponse:
     response = HttpResponse(services.batch_template_csv(), content_type="text/csv")
-    response["Content-Disposition"] = 'attachment; filename="bankrisk_batch_template.csv"'
+    response["Content-Disposition"] = 'attachment; filename="aegis_credit_batch_template.csv"'
     return response
 
 
@@ -973,7 +973,7 @@ def batch_results(request: HttpRequest, batch_id: uuid.UUID) -> HttpResponse:
         content_type="text/csv",
     )
     response["Content-Disposition"] = (
-        f'attachment; filename="bankrisk_batch_{batch.id}_results.csv"'
+        f'attachment; filename="aegis_credit_batch_{batch.id}_results.csv"'
     )
     return response
 
@@ -1240,6 +1240,14 @@ def api_docs(request: HttpRequest) -> HttpResponse:
 @require_GET
 def openapi_json(request: HttpRequest) -> JsonResponse:
     return JsonResponse(services.openapi_schema())
+
+
+@require_GET
+@access_required("analyst")
+def download_api_reference_pdf(request: HttpRequest) -> HttpResponse:
+    response = HttpResponse(services.api_reference_pdf(), content_type="application/pdf")
+    response["Content-Disposition"] = 'attachment; filename="vantage-risk-scoring-api-reference.pdf"'
+    return response
 
 
 @never_cache

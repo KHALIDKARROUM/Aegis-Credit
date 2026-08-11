@@ -12,8 +12,8 @@ htmlcov/
 .env
 .env.*
 !.env.example
-.bankrisk-local.env
-.bankrisk-docker.env
+.aegis-credit-local.env
+.aegis-credit-docker.env
 *.pem
 *.key
 *.p12

@@ -18,7 +18,9 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from django.conf import settings
 
 
-MAGIC = b"BANKRISK-BACKUP\x01"
+MAGIC = b"AEGIS-CREDIT-BACKUP\x01"
+# Stream backups written before the project rename remain readable.
+LEGACY_MAGIC = bytes.fromhex("42414e4b5249534b2d4241434b555001")
 NONCE_SIZE = 12
 TAG_SIZE = 16
 CHUNK_SIZE = 1024 * 1024
@@ -58,25 +60,38 @@ def encrypt_stream(source: BinaryIO, destination: BinaryIO, key: bytes) -> None:
 
 
 def _encrypted_layout(source: BinaryIO) -> tuple[bytes, bytes, int]:
-    header_size = len(MAGIC) + NONCE_SIZE
+    magic = _stream_magic(source)
+    if magic is None:
+        raise BackupIntegrityError("The encrypted backup format is not recognized.")
+    header_size = len(magic) + NONCE_SIZE
     source.seek(0, os.SEEK_END)
     total_size = source.tell()
     if total_size < header_size + TAG_SIZE:
         raise BackupIntegrityError("The encrypted backup is truncated.")
     source.seek(0)
     header = source.read(header_size)
-    if not header.startswith(MAGIC):
-        raise BackupIntegrityError("The encrypted backup format is not recognized.")
-    nonce = header[len(MAGIC) :]
+    nonce = header[len(magic) :]
     source.seek(-TAG_SIZE, os.SEEK_END)
     tag = source.read(TAG_SIZE)
     source.seek(header_size)
     return header, tag, total_size - header_size - TAG_SIZE
 
 
+def _stream_magic(source: BinaryIO) -> bytes | None:
+    for magic in (MAGIC, LEGACY_MAGIC):
+        source.seek(0)
+        if source.read(len(magic)) == magic:
+            return magic
+    return None
+
+
 def decrypt_stream(source: BinaryIO, destination: BinaryIO | None, key: bytes) -> None:
     header, tag, remaining = _encrypted_layout(source)
-    nonce = header[len(MAGIC) :]
+    magic = _stream_magic(source)
+    if magic is None:
+        raise BackupIntegrityError("The encrypted backup format is not recognized.")
+    source.seek(len(magic) + NONCE_SIZE)
+    nonce = header[len(magic) :]
     decryptor = Cipher(algorithms.AES(key), modes.GCM(nonce, tag)).decryptor()
     decryptor.authenticate_additional_data(header)
     try:
@@ -97,8 +112,7 @@ def decrypt_stream(source: BinaryIO, destination: BinaryIO | None, key: bytes) -
 
 def backup_format(path: Path) -> str:
     with path.open("rb") as source:
-        prefix = source.read(len(MAGIC))
-    return "stream-v1" if prefix == MAGIC else "legacy-fernet"
+        return "stream-v1" if _stream_magic(source) is not None else "legacy-fernet"
 
 
 def verify_backup(path: Path, key: bytes) -> str:

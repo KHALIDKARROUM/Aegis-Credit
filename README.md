@@ -1,6 +1,6 @@
-# BankRisk Compass
+# Aegis-Credit
 
-BankRisk Compass is an end-to-end credit-risk screening and model-governance
+Aegis-Credit is an end-to-end credit-risk screening and model-governance
 project. It combines a calibrated machine-learning model with a human review
 workflow, durable case records, batch applicant loading, monitoring, threshold
 economics, authenticated API scoring, and deployment controls.
@@ -81,7 +81,7 @@ Install Python 3.12 or newer, then run this from the project directory:
 python run.py
 ```
 
-On Windows, `py run.py` works too, or double-click `Start BankRisk Compass.bat`.
+On Windows, `py run.py` works too, or double-click `Start Aegis-Credit.bat`.
 The command creates `.venv`, installs only the dashboard dependencies when
 needed, creates persistent local development keys, applies migrations, and
 opens `http://127.0.0.1:8000/`. Subsequent launches reuse the environment and
@@ -97,15 +97,15 @@ workflow evaluation only and are not approved lending decisions.
 
 ### Windows with Docker Desktop
 
-Double-click `Start BankRisk Compass Docker.bat`. This starts the application
+Double-click `Start Aegis-Credit Docker.bat`. This starts the application
 and a durable local PostgreSQL database. It creates an ignored
-`.bankrisk-docker.env` containing local-only demonstration secrets.
+`.aegis-credit-docker.env` containing local-only demonstration secrets.
 
 ### Any platform with Docker
 
 ```bash
 python run.py docker-env
-docker compose --env-file .bankrisk-docker.env up --build
+docker compose --env-file .aegis-credit-docker.env up --build
 ```
 
 The generated file is for a loopback-bound local demonstration only. Never use
@@ -121,14 +121,14 @@ python run.py --check
 ```
 
 Activate that environment, install the full development dependencies, and load
-the generated `.bankrisk-local.env` before invoking `manage.py` directly.
+the generated `.aegis-credit-local.env` before invoking `manage.py` directly.
 
 PowerShell:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-Get-Content .bankrisk-local.env | ForEach-Object {
+Get-Content .aegis-credit-local.env | ForEach-Object {
     if ($_ -match '^(?<name>[^#=]+)=(?<value>.*)$') {
         Set-Item -Path "Env:$($Matches.name)" -Value $Matches.value
     }
@@ -142,7 +142,7 @@ macOS/Linux:
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 set -a
-. ./.bankrisk-local.env
+. ./.aegis-credit-local.env
 set +a
 python manage.py check
 ```
@@ -350,7 +350,7 @@ for local single-user operation.
 
 ```text
 app/                  Django workflows, templates, forms, models, and tests
-bankrisk_compass/     Django settings and URL configuration
+aegis_credit/         Django settings and URL configuration
 data/                 Demonstration dataset
 models/               Versioned model bundle and integrity manifest
 reports/              Generated evaluation and governance reports
@@ -383,7 +383,7 @@ python manage.py migrate
 python manage.py check
 python manage.py makemigrations --check --dry-run
 python manage.py test
-python -m compileall -q app bankrisk_compass src
+python -m compileall -q app aegis_credit src
 python -m pip check
 ```
 

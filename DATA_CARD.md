@@ -1,4 +1,4 @@
-# BankRisk Compass Data Card
+# Aegis-Credit Data Card
 
 ## Dataset
 
