@@ -5,21 +5,22 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Clear, human-centered loan application risk assessment.">
-    <title>{% block title %}BankRisk Compass{% endblock %}</title>
-    <link rel="stylesheet" href="{% static 'app/styles.css' %}">
-    <script src="{% static 'app/app.js' %}" defer></script>
+    <title>{% block title %}Vantage Risk{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'app/styles.css' %}?v=3">
+    <script src="{% static 'app/app.js' %}?v=3" defer></script>
 </head>
 <body>
     <a class="skip-link" href="#main-content">{{ skip_link_text|default:"Skip to main content" }}</a>
 
     <header class="topbar">
-        <a class="brand" href="{% url 'assessment' %}" aria-label="BankRisk Compass new assessment">
+        <a class="brand" href="{% url 'assessment' %}" aria-label="Vantage Risk home">
             <span class="brand-mark" aria-hidden="true">
-                <span class="brand-needle"></span>
+                <span class="brand-mark-core"></span>
+                <span class="brand-mark-orbit"></span>
             </span>
             <span>
-                <strong>BankRisk Compass</strong>
-                <small>Loan application guidance</small>
+                <strong>Vantage Risk</strong>
+                <small>Decision intelligence</small>
             </span>
         </a>
 
@@ -40,6 +41,10 @@
         </nav>
 
         <div class="account-actions">
+            <button class="theme-toggle" type="button" data-theme-toggle aria-pressed="false" aria-label="Enable dark mode">
+                <span class="theme-toggle-icon" aria-hidden="true"></span>
+                <span class="theme-toggle-label">Dark</span>
+            </button>
             <div class="service-status {{ workspace_badge_tone|default:'workspace' }}" aria-label="Workspace mode">
                 <span class="status-dot" aria-hidden="true"></span>
                 {% if workspace_badge_label %}
@@ -84,7 +89,7 @@
         {% endif %}
 
         <footer class="footer-row">
-            <p>{{ footer_message|default:"BankRisk Compass provides decision support for controlled staff workflows." }}</p>
+            <p>{{ footer_message|default:"Vantage Risk provides decision support for controlled staff workflows." }}</p>
             <span>{{ display_date }}</span>
         </footer>
     </main>

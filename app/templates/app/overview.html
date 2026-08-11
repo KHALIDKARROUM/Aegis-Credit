@@ -1,20 +1,38 @@
 {% extends "app/base.html" %}
 
-{% block title %}Portfolio model overview · BankRisk Compass{% endblock %}
+{% block title %}Portfolio model overview · Vantage Risk{% endblock %}
 
 {% block content %}
-<section class="page-heading">
-    <div>
-        <span class="eyebrow">Portfolio evidence</span>
-        <h1>Portfolio model overview</h1>
-        <p>Review the saved dataset, model, and policy evidence before using applicant-level guidance.</p>
+<section class="overview-hero">
+    <div class="overview-hero-copy">
+        <span class="eyebrow">Portfolio command center</span>
+        <h1>Know the risk picture before the next decision.</h1>
+        <p>One clear view of portfolio behavior, model quality, and the policy controls that shape applicant guidance.</p>
+        <div class="overview-actions">
+            <a class="primary-link" href="{% url 'assessment' %}">Start an assessment</a>
+            <a class="overview-text-link" href="{% url 'reports' %}">Open full reports <span aria-hidden="true">&rarr;</span></a>
+        </div>
     </div>
-    <a class="primary-link" href="{% url 'assessment' %}">New assessment</a>
+    <aside class="overview-signal" aria-label="Portfolio signal">
+        <span class="overview-signal-label">Observed default rate</span>
+        <strong>{{ portfolio_default_rate }}</strong>
+        <span class="overview-signal-copy">Across the saved portfolio dataset</span>
+        <span class="overview-signal-pulse" aria-hidden="true"><i></i><i></i><i></i></span>
+    </aside>
 </section>
 
-<section class="metric-grid">
+<section class="overview-section-heading" aria-labelledby="portfolio-snapshot-title">
+    <div>
+        <span class="eyebrow">At a glance</span>
+        <h2 id="portfolio-snapshot-title">Portfolio snapshot</h2>
+    </div>
+    <p>Current evidence loaded from the approved local model artifacts.</p>
+</section>
+
+<section class="metric-grid overview-metric-grid">
     {% for metric in metric_tiles %}
-        <article class="metric-tile">
+        <article class="metric-tile overview-metric-tile">
+            <span class="overview-metric-index" aria-hidden="true">0{{ forloop.counter }}</span>
             <div class="metric-label">{{ metric.label }}</div>
             <div class="metric-value">{{ metric.value }}</div>
             <div class="metric-foot">{{ metric.foot }}</div>
@@ -22,9 +40,23 @@
     {% endfor %}
 </section>
 
-<section class="dashboard-grid three-col">
-    <article class="panel">
-        <h2 class="card-title"><span class="title-icon" aria-hidden="true">DG</span>Default Rate by Grade</h2>
+<section class="overview-section-heading analysis-heading" aria-labelledby="portfolio-analysis-title">
+    <div>
+        <span class="eyebrow">Portfolio analysis</span>
+        <h2 id="portfolio-analysis-title">Where risk concentrates</h2>
+    </div>
+    <p>Default-rate patterns across the most important segmentation views.</p>
+</section>
+
+<section class="dashboard-grid three-col overview-analysis-grid">
+    <article class="panel overview-chart-card">
+        <div class="overview-card-header">
+            <div>
+                <h3 class="card-title"><span class="title-icon" aria-hidden="true">01</span>Risk by grade</h3>
+                <p>Observed default rate and applicant volume.</p>
+            </div>
+            <span class="overview-card-tag">Credit tier</span>
+        </div>
         <div class="bar-list">
             {% for row in grade_bars %}
                 <div class="bar-row">
@@ -36,8 +68,14 @@
         </div>
     </article>
 
-    <article class="panel">
-        <h2 class="card-title"><span class="title-icon" aria-hidden="true">DI</span>Default Rate by Intent</h2>
+    <article class="panel overview-chart-card">
+        <div class="overview-card-header">
+            <div>
+                <h3 class="card-title"><span class="title-icon" aria-hidden="true">02</span>Risk by intent</h3>
+                <p>Default-rate variation by borrowing purpose.</p>
+            </div>
+            <span class="overview-card-tag">Use case</span>
+        </div>
         <div class="bar-list">
             {% for row in intent_bars %}
                 <div class="bar-row">
@@ -49,32 +87,57 @@
         </div>
     </article>
 
-    <article class="panel">
-        <h2 class="card-title"><span class="title-icon" aria-hidden="true">MP</span>Model Performance</h2>
-        <table class="perf-table">
-            <caption class="sr-only">Performance at the default classification threshold</caption>
-            <thead><tr><th colspan="2">Default threshold (0.50)</th></tr></thead>
-            <tbody>
-                {% for row in default_metrics_pairs %}
-                    <tr><th scope="row">{{ row.label }}</th><td>{{ row.value }}</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        <table class="perf-table business">
-            <caption class="sr-only">Performance at the recommended business threshold</caption>
-            <thead><tr><th colspan="2">Business threshold ({{ business_threshold }})</th></tr></thead>
-            <tbody>
-                {% for row in business_metrics_pairs %}
-                    <tr><th scope="row">{{ row.label }}</th><td>{{ row.value }}</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
+    <article class="panel overview-performance-card">
+        <div class="overview-card-header">
+            <div>
+                <h3 class="card-title"><span class="title-icon" aria-hidden="true">03</span>Decision quality</h3>
+                <p>Compare the default and business operating points.</p>
+            </div>
+            <span class="overview-card-tag">Model</span>
+        </div>
+        <div class="overview-performance-tables">
+            <section>
+                <h4>Default <span>0.50</span></h4>
+                <table class="perf-table">
+                    <caption class="sr-only">Performance at the default classification threshold</caption>
+                    <tbody>
+                        {% for row in default_metrics_pairs %}
+                            <tr><th scope="row">{{ row.label }}</th><td>{{ row.value }}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </section>
+            <section class="business">
+                <h4>Business <span>{{ business_threshold }}</span></h4>
+                <table class="perf-table">
+                    <caption class="sr-only">Performance at the recommended business threshold</caption>
+                    <tbody>
+                        {% for row in business_metrics_pairs %}
+                            <tr><th scope="row">{{ row.label }}</th><td>{{ row.value }}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </section>
+        </div>
     </article>
 </section>
 
-<section class="dashboard-grid split-wide">
-    <article class="panel">
-        <h2 class="card-title"><span class="title-icon" aria-hidden="true">MC</span>Model Performance Comparison</h2>
+<section class="overview-section-heading analysis-heading" aria-labelledby="model-evidence-title">
+    <div>
+        <span class="eyebrow">Model evidence</span>
+        <h2 id="model-evidence-title">Performance and decision context</h2>
+    </div>
+    <p>Use performance evidence together with human judgment at every decision point.</p>
+</section>
+
+<section class="dashboard-grid split-wide overview-evidence-grid">
+    <article class="panel overview-comparison-card">
+        <div class="overview-card-header">
+            <div>
+                <h3 class="card-title"><span class="title-icon" aria-hidden="true">04</span>Model comparison</h3>
+                <p>Validation metrics for the saved model candidates.</p>
+            </div>
+        </div>
         <div class="comparison-chart">
             {% for row in model_comparison_bars %}
                 <div class="comparison-row">
@@ -91,22 +154,23 @@
         </div>
     </article>
 
-    <article class="insight-card">
+    <article class="insight-card overview-insight-card">
         <div>
-            <div class="insight-bulb">BI</div>
-            <div class="insight-title">Business Insight</div>
-            <div class="insight-rule"></div>
+            <span class="eyebrow">Decision note</span>
+            <div class="insight-title">The signal to watch</div>
             <p>
                 The portfolio default rate is <strong>{{ portfolio_default_rate }}</strong>.
                 The strongest global driver in the saved permutation analysis is
                 <strong>{{ top_feature }}</strong>, so underwriting should monitor this factor closely.
             </p>
+            <a class="overview-text-link" href="{% url 'insights' %}">Explore model insights <span aria-hidden="true">&rarr;</span></a>
         </div>
     </article>
 </section>
 
-<section class="note-panel">
-    <strong>Application-time contract:</strong>
-    Loan grade and interest rate are excluded from scoring because they may be assigned after underwriting begins.
+<section class="note-panel overview-policy-note">
+    <span class="overview-policy-icon" aria-hidden="true">!</span>
+    <p><strong>Application-time contract</strong><span>Loan grade and interest rate are excluded from scoring because they may be assigned after underwriting begins.</span></p>
+    <a href="{% url 'threshold' %}">Review threshold policy <span aria-hidden="true">&rarr;</span></a>
 </section>
 {% endblock %}

@@ -1,20 +1,43 @@
 {% extends "app/base.html" %}
 
-{% block title %}Model insights · BankRisk Compass{% endblock %}
+{% block title %}Model insights · Vantage Risk{% endblock %}
 
 {% block content %}
-<section class="page-heading">
-    <div>
-        <span class="eyebrow">Model evidence</span>
-        <h1>Model insights</h1>
-        <p>Compare candidate performance and global feature importance from the saved validation artifacts.</p>
+<section class="insights-hero">
+    <div class="insights-hero-copy">
+        <span class="eyebrow">Model evidence workspace</span>
+        <h1>Turn model evidence into better judgment.</h1>
+        <p>Compare validation performance, understand the drivers behind risk, and keep the right controls in view before acting on a score.</p>
+        <div class="insights-actions">
+            <a class="primary-link" href="{% url 'reports' %}">Open governance reports</a>
+            <a class="overview-text-link" href="{% url 'threshold' %}">Review threshold analysis <span aria-hidden="true">&rarr;</span></a>
+        </div>
     </div>
-    <a class="text-button" href="{% url 'reports' %}">Back to reports</a>
+    <aside class="insights-hero-stat" aria-label="Global driver evidence">
+        <span class="insights-hero-stat-label">Global drivers reviewed</span>
+        <strong>{{ importance_bars|length }}</strong>
+        <span>Permutation importance factors</span>
+        <div class="insights-sparkline" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    </aside>
 </section>
 
-<section class="dashboard-grid split">
-    <article class="panel">
-        <h2 class="card-title"><span class="title-icon" aria-hidden="true">MC</span>Model Performance Comparison</h2>
+<section class="insights-section-heading" aria-labelledby="insights-evidence-title">
+    <div>
+        <span class="eyebrow">Evidence at a glance</span>
+        <h2 id="insights-evidence-title">Performance and drivers</h2>
+    </div>
+    <p>Validation quality tells you how the candidates performed; global drivers show where the model found signal.</p>
+</section>
+
+<section class="dashboard-grid split insights-evidence-grid">
+    <article class="panel insights-performance-card">
+        <div class="insights-card-header">
+            <div>
+                <h3 class="card-title"><span class="title-icon" aria-hidden="true">01</span>Candidate performance</h3>
+                <p>Comparison across F1-score, ROC-AUC, and accuracy.</p>
+            </div>
+            <span class="insights-card-tag">Validation</span>
+        </div>
         <div class="comparison-chart">
             {% for row in model_comparison_bars %}
                 <div class="comparison-row">
@@ -31,8 +54,14 @@
         </div>
     </article>
 
-    <article class="panel">
-        <h2 class="card-title"><span class="title-icon" aria-hidden="true">DR</span>Top Credit Risk Drivers</h2>
+    <article class="panel insights-drivers-card">
+        <div class="insights-card-header">
+            <div>
+                <h3 class="card-title"><span class="title-icon" aria-hidden="true">02</span>Risk drivers</h3>
+                <p>Relative impact in the saved permutation analysis.</p>
+            </div>
+            <span class="insights-card-tag">Global</span>
+        </div>
         <div class="bar-list importance-list">
             {% for row in importance_bars %}
                 <div class="bar-row">
@@ -47,9 +76,23 @@
     </article>
 </section>
 
-<section class="panel">
-    <h2 class="card-title"><span class="title-icon" aria-hidden="true">MT</span>Model Metrics Table</h2>
-    <div class="table-wrap">
+<section class="insights-section-heading insights-table-heading" aria-labelledby="metrics-table-title">
+    <div>
+        <span class="eyebrow">Validation record</span>
+        <h2 id="metrics-table-title">Candidate metrics, in detail</h2>
+    </div>
+    <p>Use the full table when comparing trade-offs between candidate models.</p>
+</section>
+
+<section class="panel insights-table-card">
+    <div class="insights-card-header">
+        <div>
+            <h3 class="card-title"><span class="title-icon" aria-hidden="true">03</span>Model metrics table</h3>
+            <p>Saved validation artifact values, rounded to three decimal places.</p>
+        </div>
+        <span class="insights-card-tag">{{ model_comparison_table.rows|length }} candidates</span>
+    </div>
+    <div class="table-wrap insights-table-wrap">
         <table class="data-table">
             <caption class="sr-only">Validation metrics for each candidate model</caption>
             <thead>
@@ -72,8 +115,9 @@
     </div>
 </section>
 
-<section class="note-panel">
-    <strong>Application-time contract:</strong>
-    Loan grade and interest rate remain available for portfolio analysis, but they are excluded from applicant scoring.
+<section class="note-panel insights-policy-note">
+    <span class="overview-policy-icon" aria-hidden="true">!</span>
+    <p><strong>Scoring boundary</strong><span>Loan grade and interest rate remain available for portfolio analysis, but they are excluded from applicant scoring.</span></p>
+    <a href="{% url 'assessment' %}">Start an assessment <span aria-hidden="true">&rarr;</span></a>
 </section>
 {% endblock %}

@@ -127,6 +127,6 @@ def product_shell(request: HttpRequest) -> dict[str, Any]:
         "skip_link_text": "Skip to main content",
         "footer_message": FOOTER_MESSAGES.get(
             route_name,
-            "BankRisk Compass provides decision support for controlled staff workflows.",
+            "Vantage Risk provides decision support for controlled staff workflows.",
         ),
     }

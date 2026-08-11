@@ -1043,7 +1043,7 @@ def openapi_schema() -> dict[str, Any]:
     return {
         "openapi": "3.1.0",
         "info": {
-            "title": "BankRisk Compass Scoring API",
+            "title": "Vantage Risk Scoring API",
             "version": "1.0.0",
             "description": (
                 "Versioned screening API. It supports human review and does not "
@@ -1434,7 +1434,7 @@ def summary_pdf(dashboard: dict[str, Any]) -> bytes:
         axis.axis("off")
 
         y = 0.96
-        axis.text(0.05, y, "BankRisk Compass Report", fontsize=18, fontweight="bold", color="#071942")
+        axis.text(0.05, y, "Vantage Risk Report", fontsize=18, fontweight="bold", color="#071942")
         y -= 0.055
         axis.text(0.05, y, f"Generated: {display_date()}", fontsize=10, color="#60708d")
         if settings.LOCAL_DEMO_MODE:

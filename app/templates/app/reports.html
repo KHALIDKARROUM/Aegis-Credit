@@ -1,31 +1,45 @@
 {% extends "app/base.html" %}
 
-{% block title %}Model and governance reports · BankRisk Compass{% endblock %}
+{% block title %}Model and governance reports · Vantage Risk{% endblock %}
 
 {% block content %}
-<section class="page-heading">
-    <div>
-        <span class="eyebrow">Governance evidence</span>
-        <h1>Model and validation reports</h1>
-        <p>Review model, data, threshold, calibration, subgroup, and release evidence together.</p>
+<section class="reports-hero">
+    <div class="reports-hero-copy">
+        <span class="eyebrow">Governance evidence hub</span>
+        <h1>Reports built for confident model decisions.</h1>
+        <p>Bring model, data, threshold, calibration, subgroup, and release evidence into one reviewable record.</p>
+        <div class="reports-hero-actions">
+            <a class="download-button" href="{% url 'download-summary-pdf' %}">Download PDF</a>
+            <a class="download-button secondary" href="{% url 'download-summary-csv' %}">Download CSV</a>
+        </div>
     </div>
-    <div class="report-actions">
-        <a class="download-button" href="{% url 'download-summary-pdf' %}">Download PDF</a>
-        <a class="download-button secondary" href="{% url 'download-summary-csv' %}">Download CSV</a>
-        <a class="download-button secondary" href="{% url 'insights' %}">Model insights</a>
-        <a class="download-button secondary" href="{% url 'threshold' %}">Threshold analysis</a>
-    </div>
+    <aside class="reports-release-card" aria-label="Report release status">
+        <span class="reports-release-label">Release status</span>
+        <strong>{{ report_release_status|default:"Evidence ready" }}</strong>
+        <span>{{ report_release_message|default:"Review the provenance record before distribution." }}</span>
+        <div class="reports-release-links">
+            <a href="{% url 'insights' %}">Model insights</a>
+            <a href="{% url 'threshold' %}">Threshold policy</a>
+        </div>
+    </aside>
 </section>
 
 {% if report_release_status %}
-<section class="status-banner {{ report_release_tone|default:'neutral' }}" role="status">
+<section class="status-banner reports-status-banner {{ report_release_tone|default:'neutral' }}" role="status">
     <strong>{{ report_release_status }}</strong>
     {% if report_release_message %}<span>{{ report_release_message }}</span>{% endif %}
 </section>
 {% endif %}
 
 {% if report_provenance %}
-<dl class="provenance-strip" aria-label="Report provenance">
+<section class="reports-section-heading reports-provenance-heading" aria-labelledby="report-provenance-title">
+    <div>
+        <span class="eyebrow">Traceability</span>
+        <h2 id="report-provenance-title">Release provenance</h2>
+    </div>
+    <p>Confirm what generated this evidence before approving its use.</p>
+</section>
+<dl class="provenance-strip reports-provenance-strip" aria-label="Report provenance">
     {% for row in report_provenance %}<div><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></div>{% endfor %}
 </dl>
 {% else %}
@@ -35,9 +49,17 @@
 </section>
 {% endif %}
 
-<section class="dashboard-grid three-col report-summary-grid">
-    <article class="panel">
-        <h2 class="card-title"><span class="title-icon" aria-hidden="true">MS</span>Model Summary</h2>
+<section class="reports-section-heading reports-summary-heading" aria-labelledby="report-summary-title">
+    <div>
+        <span class="eyebrow">Decision summary</span>
+        <h2 id="report-summary-title">The essential record</h2>
+    </div>
+    <p>Model, dataset, and threshold facts at the point of review.</p>
+</section>
+
+<section class="dashboard-grid three-col report-summary-grid reports-summary-grid-refined">
+    <article class="panel reports-summary-card">
+        <div class="reports-card-header"><h3 class="card-title"><span class="title-icon" aria-hidden="true">01</span>Model summary</h3><span>Model</span></div>
         <dl class="summary-list">
             {% for row in report_summary.model_summary %}
                 <div><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></div>
@@ -45,8 +67,8 @@
         </dl>
     </article>
 
-    <article class="panel">
-        <h2 class="card-title"><span class="title-icon" aria-hidden="true">DS</span>Dataset Summary</h2>
+    <article class="panel reports-summary-card">
+        <div class="reports-card-header"><h3 class="card-title"><span class="title-icon" aria-hidden="true">02</span>Dataset summary</h3><span>Data</span></div>
         <dl class="summary-list">
             {% for row in report_summary.dataset_summary %}
                 <div><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></div>
@@ -54,8 +76,8 @@
         </dl>
     </article>
 
-    <article class="panel">
-        <h2 class="card-title"><span class="title-icon" aria-hidden="true">BT</span>Chosen Threshold</h2>
+    <article class="panel reports-summary-card">
+        <div class="reports-card-header"><h3 class="card-title"><span class="title-icon" aria-hidden="true">03</span>Chosen threshold</h3><span>Policy</span></div>
         <dl class="summary-list">
             {% for row in report_summary.threshold_summary %}
                 <div><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></div>
@@ -64,10 +86,18 @@
     </article>
 </section>
 
-<section class="dashboard-grid split-wide">
-    <article class="panel">
-        <h2 class="card-title"><span class="title-icon" aria-hidden="true">CM</span>Confusion Matrix</h2>
-        <div class="table-wrap">
+<section class="reports-section-heading reports-evidence-heading" aria-labelledby="decision-evidence-title">
+    <div>
+        <span class="eyebrow">Decision evidence</span>
+        <h2 id="decision-evidence-title">Performance at the operating point</h2>
+    </div>
+    <p>Review classification outcomes alongside the recommended next action.</p>
+</section>
+
+<section class="dashboard-grid split-wide reports-decision-grid">
+    <article class="panel reports-matrix-card">
+        <div class="reports-card-header"><div><h3 class="card-title"><span class="title-icon" aria-hidden="true">04</span>Confusion matrix</h3><p>Outcomes at the chosen screening threshold.</p></div></div>
+        <div class="table-wrap reports-table-wrap">
             <table class="data-table">
                 <caption class="sr-only">Confusion matrix at the chosen screening threshold</caption>
                 <thead>
@@ -90,27 +120,45 @@
         </div>
     </article>
 
-    <article class="panel recommendation-panel">
-        <h2 class="card-title"><span class="title-icon" aria-hidden="true">BR</span>Business Recommendation</h2>
+    <article class="panel recommendation-panel reports-recommendation-card">
+        <span class="eyebrow">Recommended action</span>
+        <h3 class="card-title"><span class="title-icon" aria-hidden="true">05</span>Business recommendation</h3>
         <p>{{ report_summary.business_recommendation }}</p>
+        <a class="overview-text-link" href="{% url 'business-policy' %}">Open policy scenario <span aria-hidden="true">&rarr;</span></a>
     </article>
 </section>
 
-<section class="dashboard-grid split">
-    <article class="panel">
-        <h2 class="card-title"><span class="title-icon" aria-hidden="true">BR</span>Business Report</h2>
+<section class="reports-section-heading reports-evidence-heading" aria-labelledby="narrative-evidence-title">
+    <div>
+        <span class="eyebrow">Review materials</span>
+        <h2 id="narrative-evidence-title">Narrative and classification evidence</h2>
+    </div>
+    <p>Read the written interpretation beside the source classification output.</p>
+</section>
+
+<section class="dashboard-grid split reports-narrative-grid">
+    <article class="panel reports-prose-card">
+        <div class="reports-card-header"><div><h3 class="card-title"><span class="title-icon" aria-hidden="true">06</span>Business report</h3><p>Final written interpretation of the model evidence.</p></div></div>
         <div class="report-prose">{{ business_report_html|safe }}</div>
     </article>
 
-    <article class="panel">
-        <h2 class="card-title" id="classification-report-title"><span class="title-icon" aria-hidden="true">CR</span>Classification Report</h2>
+    <article class="panel reports-classification-card">
+        <div class="reports-card-header"><div><h3 class="card-title" id="classification-report-title"><span class="title-icon" aria-hidden="true">07</span>Classification report</h3><p>Source validation output for the final model.</p></div></div>
         <pre class="code-block" aria-labelledby="classification-report-title">{{ classification_report }}</pre>
     </article>
 </section>
 
-<section class="panel">
-    <h2 class="card-title"><span class="title-icon" aria-hidden="true">FM</span>Final Model Metrics</h2>
-    <div class="table-wrap">
+<section class="reports-section-heading reports-evidence-heading" aria-labelledby="final-metrics-title">
+    <div>
+        <span class="eyebrow">Final validation</span>
+        <h2 id="final-metrics-title">Metrics and diagnostics</h2>
+    </div>
+    <p>Inspect the detailed evaluation record and diagnostic monitoring outputs.</p>
+</section>
+
+<section class="panel reports-final-metrics-card">
+    <div class="reports-card-header"><div><h3 class="card-title"><span class="title-icon" aria-hidden="true">08</span>Final model metrics</h3><p>Default and business threshold evaluation values.</p></div></div>
+    <div class="table-wrap reports-table-wrap">
         <table class="data-table">
             <caption class="sr-only">Final model evaluation metrics</caption>
             <thead>
@@ -133,16 +181,16 @@
     </div>
 </section>
 
-<section class="dashboard-grid split">
-    <article class="panel">
-        <h2 class="card-title"><span class="title-icon" aria-hidden="true">CA</span>Probability Calibration</h2>
+<section class="dashboard-grid split reports-diagnostic-grid">
+    <article class="panel reports-calibration-card">
+        <div class="reports-card-header"><div><h3 class="card-title"><span class="title-icon" aria-hidden="true">09</span>Probability calibration</h3><p>Alignment between predicted and observed default rates.</p></div></div>
         <img class="report-image" src="{% url 'report-artifact' 'calibration_curve.png' %}" alt="Predicted probability compared with observed default rate">
         <p class="section-copy">Points closer to the diagonal indicate that displayed probabilities better match observed default rates.</p>
     </article>
 
-    <article class="panel">
-        <h2 class="card-title"><span class="title-icon" aria-hidden="true">FG</span>Age-group Monitoring</h2>
-        <div class="table-wrap">
+    <article class="panel reports-monitoring-card">
+        <div class="reports-card-header"><div><h3 class="card-title"><span class="title-icon" aria-hidden="true">10</span>Age-group monitoring</h3><p>Diagnostic metrics for monitoring, not a fairness conclusion.</p></div></div>
+        <div class="table-wrap reports-table-wrap">
             <table class="data-table">
                 <caption class="sr-only">Age-group diagnostic metrics</caption>
                 <thead>
@@ -161,9 +209,17 @@
     </article>
 </section>
 
-<section class="panel">
-    <h2 class="card-title"><span class="title-icon" aria-hidden="true">AR</span>Project Artifacts</h2>
-    <div class="table-wrap">
+<section class="reports-section-heading reports-evidence-heading" aria-labelledby="artifact-register-title">
+    <div>
+        <span class="eyebrow">Audit trail</span>
+        <h2 id="artifact-register-title">Artifact register</h2>
+    </div>
+    <p>Downloadable evidence linked to the model review and release process.</p>
+</section>
+
+<section class="panel reports-artifact-card">
+    <div class="reports-card-header"><div><h3 class="card-title"><span class="title-icon" aria-hidden="true">11</span>Project artifacts</h3><p>Generated sources and their intended review purpose.</p></div></div>
+    <div class="table-wrap reports-table-wrap">
         <table class="data-table">
             <caption class="sr-only">Generated project artifacts and their purpose</caption>
             <thead><tr><th scope="col">Artifact</th><th scope="col">Purpose</th><th scope="col">Access</th></tr></thead>

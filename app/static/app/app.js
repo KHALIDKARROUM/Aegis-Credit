@@ -1,4 +1,46 @@
 document.addEventListener("DOMContentLoaded", () => {
+    const root = document.documentElement;
+    const themeToggle = document.querySelector("[data-theme-toggle]");
+    const themeIcon = themeToggle?.querySelector(".theme-toggle-icon");
+    const themeLabel = themeToggle?.querySelector(".theme-toggle-label");
+
+    const storedTheme = (() => {
+        try {
+            return localStorage.getItem("vantage-risk-theme");
+        } catch {
+            return null;
+        }
+    })();
+
+    const systemPrefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
+    root.dataset.theme = storedTheme || (systemPrefersDark ? "dark" : "light");
+
+    const updateThemeToggle = () => {
+        const isDark = root.dataset.theme === "dark";
+        if (themeToggle) {
+            themeToggle.setAttribute("aria-pressed", String(isDark));
+            themeToggle.setAttribute("aria-label", isDark ? "Enable light mode" : "Enable dark mode");
+        }
+        if (themeIcon) {
+            themeIcon.classList.toggle("is-dark", isDark);
+        }
+        if (themeLabel) {
+            themeLabel.textContent = isDark ? "Light" : "Dark";
+        }
+    };
+
+    updateThemeToggle();
+    themeToggle?.addEventListener("click", () => {
+        const nextTheme = root.dataset.theme === "dark" ? "light" : "dark";
+        root.dataset.theme = nextTheme;
+        try {
+            localStorage.setItem("vantage-risk-theme", nextTheme);
+        } catch {
+            // The visual setting still works when browser storage is unavailable.
+        }
+        updateThemeToggle();
+    });
+
     for (const group of document.querySelectorAll(".field-group")) {
         const control = group.querySelector("input:not([type='hidden']), select, textarea");
         if (!control) {
