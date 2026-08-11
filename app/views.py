@@ -70,8 +70,31 @@ def assessment_context() -> tuple[dict[str, object], dict[str, object] | None]:
     try:
         bundle = services.load_model_bundle()
     except (FileNotFoundError, services.ArtifactIntegrityError) as exc:
-        LOGGER.exception("Assessment service could not start: %s", exc)
-        context["error_message"] = "Assessment service unavailable."
+        # A disabled model is an expected, safe state for a local checkout that
+        # contains demonstration data rather than an approved model release.
+        LOGGER.warning("Assessment service is unavailable: %s", exc)
+        if isinstance(exc, services.ArtifactIntegrityError) and not settings.DATA_PROVENANCE_VERIFIED:
+            context.update(
+                {
+                    "error_title": "Scoring is disabled for this demonstration project",
+                    "error_message": (
+                        "The bundled dataset and model have not been approved for operational use, "
+                        "so BankRisk Compass will not produce loan-risk scores."
+                    ),
+                    "error_guidance": (
+                        "This is expected in a local checkout. Scoring can only be enabled with an "
+                        "approved, signed model release and verified data provenance."
+                    ),
+                }
+            )
+        else:
+            context.update(
+                {
+                    "error_title": "Assessment service unavailable",
+                    "error_message": "The approved model release could not be loaded.",
+                    "error_guidance": "Check the model release configuration and try again.",
+                }
+            )
         return context, None
     return context, bundle
 

@@ -67,15 +67,25 @@ monitoring.
 
 ## Quick start
 
-### Windows, no containers
+### Local development (one command)
 
-1. Install Python 3.13 and select **Add Python to PATH**.
-2. Double-click `Start BankRisk Compass.bat`.
-3. Open `http://127.0.0.1:8000/`.
+Install Python 3.12 or newer, then run this from the project directory:
 
-The launcher creates `.venv`, installs runtime packages, runs migrations, and
-opens the browser. Local access control is disabled by default because the
-server listens only on `127.0.0.1`.
+```bash
+python run.py
+```
+
+On Windows, `py run.py` works too, or double-click `Start BankRisk Compass.bat`.
+The command creates `.venv`, installs only the dashboard dependencies when
+needed, creates persistent local development keys, applies migrations, and
+opens `http://127.0.0.1:8000/`. Subsequent launches reuse the environment and
+keys, so locally encrypted case records remain readable.
+
+Use `python run.py --no-browser` on a headless machine and
+`python run.py --check` to validate the setup without starting the server.
+Local access control is disabled by default because the server listens only on
+`127.0.0.1`. The launcher does not bypass model-release or data-provenance
+controls; the included demonstration artifact remains non-operational.
 
 ### Windows with Docker Desktop
 

@@ -61,8 +61,9 @@
             <section class="panel service-error" role="alert">
                 <span class="card-icon" aria-hidden="true">!</span>
                 <div>
-                    <h2>Assessment temporarily unavailable</h2>
-                    <p>Please try again in a few moments. If the issue continues, contact your support team.</p>
+                    <h2>{{ error_title|default:"Assessment temporarily unavailable" }}</h2>
+                    <p>{{ error_message }}</p>
+                    {% if error_guidance %}<p>{{ error_guidance }}</p>{% endif %}
                 </div>
             </section>
         {% else %}

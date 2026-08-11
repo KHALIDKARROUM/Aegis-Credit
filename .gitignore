@@ -9,3 +9,4 @@ staticfiles/
 .coverage
 htmlcov/
 .env
+.bankrisk-local.env
