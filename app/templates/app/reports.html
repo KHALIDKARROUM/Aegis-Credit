@@ -1,16 +1,43 @@
 {% extends "app/base.html" %}
 
+{% block title %}Model and governance reports · BankRisk Compass{% endblock %}
+
 {% block content %}
-<section class="report-actions">
-    <a class="download-button" href="{% url 'download-summary-pdf' %}">Download PDF</a>
-    <a class="download-button secondary" href="{% url 'download-summary-csv' %}">Download CSV</a>
-    <a class="download-button secondary" href="{% url 'report-artifact' 'final_model_metrics.csv' %}">Final Metrics CSV</a>
-    <a class="download-button secondary" href="{% url 'report-artifact' 'threshold_analysis.csv' %}">Threshold CSV</a>
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">Governance evidence</span>
+        <h1>Model and validation reports</h1>
+        <p>Review model, data, threshold, calibration, subgroup, and release evidence together.</p>
+    </div>
+    <div class="report-actions">
+        <a class="download-button" href="{% url 'download-summary-pdf' %}">Download PDF</a>
+        <a class="download-button secondary" href="{% url 'download-summary-csv' %}">Download CSV</a>
+        <a class="download-button secondary" href="{% url 'insights' %}">Model insights</a>
+        <a class="download-button secondary" href="{% url 'threshold' %}">Threshold analysis</a>
+    </div>
 </section>
+
+{% if report_release_status %}
+<section class="status-banner {{ report_release_tone|default:'neutral' }}" role="status">
+    <strong>{{ report_release_status }}</strong>
+    {% if report_release_message %}<span>{{ report_release_message }}</span>{% endif %}
+</section>
+{% endif %}
+
+{% if report_provenance %}
+<dl class="provenance-strip" aria-label="Report provenance">
+    {% for row in report_provenance %}<div><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></div>{% endfor %}
+</dl>
+{% else %}
+<section class="status-banner neutral" role="status">
+    <strong>Artifact generation metadata is not attached to this page.</strong>
+    <span>Confirm the model version and trained date below, then verify source-file timestamps before approval.</span>
+</section>
+{% endif %}
 
 <section class="dashboard-grid three-col report-summary-grid">
     <article class="panel">
-        <div class="card-title"><span class="title-icon">MS</span>Model Summary</div>
+        <h2 class="card-title"><span class="title-icon" aria-hidden="true">MS</span>Model Summary</h2>
         <dl class="summary-list">
             {% for row in report_summary.model_summary %}
                 <div><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></div>
@@ -19,7 +46,7 @@
     </article>
 
     <article class="panel">
-        <div class="card-title"><span class="title-icon">DS</span>Dataset Summary</div>
+        <h2 class="card-title"><span class="title-icon" aria-hidden="true">DS</span>Dataset Summary</h2>
         <dl class="summary-list">
             {% for row in report_summary.dataset_summary %}
                 <div><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></div>
@@ -28,7 +55,7 @@
     </article>
 
     <article class="panel">
-        <div class="card-title"><span class="title-icon">BT</span>Chosen Threshold</div>
+        <h2 class="card-title"><span class="title-icon" aria-hidden="true">BT</span>Chosen Threshold</h2>
         <dl class="summary-list">
             {% for row in report_summary.threshold_summary %}
                 <div><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></div>
@@ -39,20 +66,21 @@
 
 <section class="dashboard-grid split-wide">
     <article class="panel">
-        <div class="card-title"><span class="title-icon">CM</span>Confusion Matrix</div>
+        <h2 class="card-title"><span class="title-icon" aria-hidden="true">CM</span>Confusion Matrix</h2>
         <div class="table-wrap">
             <table class="data-table">
+                <caption class="sr-only">Confusion matrix at the chosen screening threshold</caption>
                 <thead>
                     <tr>
-                        <th></th>
-                        <th>Predicted non-default</th>
-                        <th>Predicted default</th>
+                        <th scope="col"><span class="sr-only">Actual outcome</span></th>
+                        <th scope="col">Predicted non-default</th>
+                        <th scope="col">Predicted default</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for row in report_summary.confusion %}
                         <tr>
-                            <th>{{ row.actual }}</th>
+                            <th scope="row">{{ row.actual }}</th>
                             <td>{{ row.predicted_non_default }}</td>
                             <td>{{ row.predicted_default }}</td>
                         </tr>
@@ -63,31 +91,32 @@
     </article>
 
     <article class="panel recommendation-panel">
-        <div class="card-title"><span class="title-icon">BR</span>Business Recommendation</div>
+        <h2 class="card-title"><span class="title-icon" aria-hidden="true">BR</span>Business Recommendation</h2>
         <p>{{ report_summary.business_recommendation }}</p>
     </article>
 </section>
 
 <section class="dashboard-grid split">
     <article class="panel">
-        <div class="card-title"><span class="title-icon">BR</span>Business Report</div>
+        <h2 class="card-title"><span class="title-icon" aria-hidden="true">BR</span>Business Report</h2>
         <div class="report-prose">{{ business_report_html|safe }}</div>
     </article>
 
     <article class="panel">
-        <div class="card-title"><span class="title-icon">CR</span>Classification Report</div>
-        <pre class="code-block">{{ classification_report }}</pre>
+        <h2 class="card-title" id="classification-report-title"><span class="title-icon" aria-hidden="true">CR</span>Classification Report</h2>
+        <pre class="code-block" aria-labelledby="classification-report-title">{{ classification_report }}</pre>
     </article>
 </section>
 
 <section class="panel">
-    <div class="card-title"><span class="title-icon">FM</span>Final Model Metrics</div>
+    <h2 class="card-title"><span class="title-icon" aria-hidden="true">FM</span>Final Model Metrics</h2>
     <div class="table-wrap">
         <table class="data-table">
+            <caption class="sr-only">Final model evaluation metrics</caption>
             <thead>
                 <tr>
                     {% for column in final_metrics_table.columns %}
-                        <th>{{ column }}</th>
+                        <th scope="col">{{ column }}</th>
                     {% endfor %}
                 </tr>
             </thead>
@@ -106,18 +135,19 @@
 
 <section class="dashboard-grid split">
     <article class="panel">
-        <div class="card-title"><span class="title-icon">CA</span>Probability Calibration</div>
+        <h2 class="card-title"><span class="title-icon" aria-hidden="true">CA</span>Probability Calibration</h2>
         <img class="report-image" src="{% url 'report-artifact' 'calibration_curve.png' %}" alt="Predicted probability compared with observed default rate">
         <p class="section-copy">Points closer to the diagonal indicate that displayed probabilities better match observed default rates.</p>
     </article>
 
     <article class="panel">
-        <div class="card-title"><span class="title-icon">FG</span>Age-group Monitoring</div>
+        <h2 class="card-title"><span class="title-icon" aria-hidden="true">FG</span>Age-group Monitoring</h2>
         <div class="table-wrap">
             <table class="data-table">
+                <caption class="sr-only">Age-group diagnostic metrics</caption>
                 <thead>
                     <tr>
-                        {% for column in fairness_table.columns %}<th>{{ column }}</th>{% endfor %}
+                        {% for column in fairness_table.columns %}<th scope="col">{{ column }}</th>{% endfor %}
                     </tr>
                 </thead>
                 <tbody>
@@ -132,13 +162,26 @@
 </section>
 
 <section class="panel">
-    <div class="card-title"><span class="title-icon">AR</span>Project Artifacts</div>
+    <h2 class="card-title"><span class="title-icon" aria-hidden="true">AR</span>Project Artifacts</h2>
     <div class="table-wrap">
         <table class="data-table">
-            <thead><tr><th>Artifact</th><th>Purpose</th></tr></thead>
+            <caption class="sr-only">Generated project artifacts and their purpose</caption>
+            <thead><tr><th scope="col">Artifact</th><th scope="col">Purpose</th><th scope="col">Access</th></tr></thead>
             <tbody>
                 {% for row in artifact_rows %}
-                    <tr><td>{{ row.artifact }}</td><td>{{ row.purpose }}</td></tr>
+                    <tr>
+                        <th scope="row"><code>{{ row.artifact }}</code></th>
+                        <td>{{ row.purpose }}</td>
+                        <td>
+                            {% if row.available == False %}
+                                <span class="muted-text">Available after a 2.2 release</span>
+                            {% elif row.artifact == "credit_risk_model.pkl" %}
+                                <span class="muted-text">Restricted release asset</span>
+                            {% else %}
+                                <a class="inline-link" href="{% url 'report-artifact' row.artifact %}">Download</a>
+                            {% endif %}
+                        </td>
+                    </tr>
                 {% endfor %}
             </tbody>
         </table>

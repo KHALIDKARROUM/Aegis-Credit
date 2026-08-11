@@ -1,0 +1,25 @@
+{% extends "app/base.html" %}
+
+{% block title %}Access restricted · BankRisk Compass{% endblock %}
+
+{% block content %}
+<section class="error-shell" aria-labelledby="error-title">
+    <article class="panel error-card">
+        <span class="error-code" aria-hidden="true">403</span>
+        <span class="eyebrow">Access restricted</span>
+        <h1 id="error-title">Your account cannot open this area</h1>
+        <p>{{ error_message|default:"This page requires a different BankRisk Compass role." }}</p>
+        <div class="page-actions">
+            {% if product_nav_items %}
+                <a class="primary-link" href="{% url product_nav_items.0.url_name %}">Return to {{ product_nav_items.0.label|lower }}</a>
+            {% elif not user.is_authenticated %}
+                <a class="primary-link" href="{% url 'login' %}">Sign in</a>
+            {% endif %}
+            {% if user.is_authenticated %}
+                <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="text-button" type="submit">Use another account</button></form>
+            {% endif %}
+        </div>
+        <p class="section-copy">If access is required for your work, contact an administrator instead of sharing another user’s credentials.</p>
+    </article>
+</section>
+{% endblock %}

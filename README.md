@@ -5,9 +5,10 @@ project. It combines a calibrated machine-learning model with a human review
 workflow, durable case records, batch applicant loading, monitoring, threshold
 economics, authenticated API scoring, and deployment controls.
 
-It is designed as a learning, portfolio, and controlled pilot system. It does
-not approve or decline credit and does not generate compliant adverse-action
-notices.
+It is designed for learning, portfolio demonstrations, and development of a
+possible future controlled-pilot workflow. The checked-in data and model are
+not approved for a controlled pilot. The application does not approve or
+decline credit and does not generate compliant adverse-action notices.
 
 ## Product capabilities
 
@@ -15,20 +16,24 @@ notices.
 - validated application-time inputs and unusual-value warnings;
 - calibrated probability, reachable Low/Medium/High bands, and staff guidance;
 - model-behavior explanations clearly separated from adverse-action reasons;
-- durable assessment cases with notes, status, assignments, and documented overrides;
+- durable assessment cases with assignment, SLA timing, immutable reviews, legal holds, and mature outcomes;
 - idempotent web/API scoring and keyed audit fingerprints;
-- CSV and Excel batch upload with row-level validation and downloadable results;
-- operational volume, risk-mix, override, and drift monitoring;
-- financial threshold scenarios using exposure, LGD, margin, and review cost;
-- analyst, reviewer, and administrator access roles;
+- CSV and Excel batch upload with durable queued rows, retry/cancel controls, validation warnings, and downloadable results;
+- version-filtered volume, risk, outcome, drift, and acknowledged monitoring runs;
+- versioned financial threshold scenarios with recorded administrator decisions;
+- scoped analyst, reviewer, legal-officer, and administrator roles;
 - OpenAPI documentation, API-key authentication, and rate limiting;
 - SQLite for local use and PostgreSQL support for shared deployments;
 - Windows launchers, Docker Compose, Render configuration, health checks, and CI.
 
-## Current model
+## Checked-in demonstration model
 
-Version `2.1.0` selects the champion after each candidate has been calibrated and
-given a threshold on separate data partitions.
+Version `2.1.0` is the historical, unsigned demonstration artifact. It selected
+the champion after each candidate was calibrated and given a threshold on
+separate data partitions. That run trusted a source-provided loan-to-income
+ratio while the corrected feature contract derives the ratio from amount and
+income. The figures below are therefore historical UI evidence, not validation
+of the corrected `2.2.0` contract and not production-release evidence.
 
 | Model | Selection F1 | ROC-AUC | Brier score | Threshold |
 |---|---:|---:|---:|---:|
@@ -49,7 +54,7 @@ At `0.21`, 28.4% of the test population is routed to review, compared with
 Policy page lets reviewers replace it with explicit financial assumptions
 without silently changing the live model.
 
-## Validation design
+## Historical validation design
 
 The cleaned dataset is divided into five non-overlapping partitions:
 
@@ -63,7 +68,8 @@ Preprocessing remains inside scikit-learn pipelines. Feature-reference and drift
 baselines are built from training rows only. Loan grade and interest rate are
 excluded from application-time scoring because they may be lender-assigned.
 Age is excluded from the score and used only for plausibility checks and limited
-monitoring.
+monitoring. A new release must repeat the complete evaluation with the canonical
+derived ratio before these metrics can be relied on.
 
 ## Quick start
 
@@ -85,31 +91,73 @@ Use `python run.py --no-browser` on a headless machine and
 `python run.py --check` to validate the setup without starting the server.
 Local access control is disabled by default because the server listens only on
 `127.0.0.1`. The launcher does not bypass model-release or data-provenance
-controls; the included demonstration artifact remains non-operational.
+controls for production. It enables an explicitly labeled local demo mode that
+checks the bundled model against its manifest hash. Demo scores are for UI and
+workflow evaluation only and are not approved lending decisions.
 
 ### Windows with Docker Desktop
 
 Double-click `Start BankRisk Compass Docker.bat`. This starts the application
-and a durable local PostgreSQL database.
+and a durable local PostgreSQL database. It creates an ignored
+`.bankrisk-docker.env` containing local-only demonstration secrets.
 
 ### Any platform with Docker
 
 ```bash
-docker compose up --build
+python run.py docker-env
+docker compose --env-file .bankrisk-docker.env up --build
 ```
+
+The generated file is for a loopback-bound local demonstration only. Never use
+it in a shared environment or copy its secrets into a production deployment.
 
 ### Developer setup
 
+First let the local launcher create stable, untracked development keys and the
+application environment:
+
 ```bash
-python -m venv .venv
-.venv\Scripts\activate
+python run.py --check
+```
+
+Activate that environment, install the full development dependencies, and load
+the generated `.bankrisk-local.env` before invoking `manage.py` directly.
+
+PowerShell:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
+Get-Content .bankrisk-local.env | ForEach-Object {
+    if ($_ -match '^(?<name>[^#=]+)=(?<value>.*)$') {
+        Set-Item -Path "Env:$($Matches.name)" -Value $Matches.value
+    }
+}
+python manage.py check
+```
+
+macOS/Linux:
+
+```bash
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+set -a
+. ./.bankrisk-local.env
+set +a
+python manage.py check
+```
+
+Once that environment is loaded, normal Django commands work:
+
+```bash
 python manage.py migrate
 python manage.py bootstrap_roles
 python manage.py runserver
 ```
 
-On macOS/Linux, activate with `source .venv/bin/activate`.
+Direct `manage.py` commands intentionally fail when mandatory keys are absent.
+Production and CI must inject those values through their secret-management
+environment rather than loading the local file.
 
 ## Authentication and roles
 
@@ -130,9 +178,10 @@ BOOTSTRAP_ADMIN_EMAIL
 
 Roles:
 
-- **Analysts** can score, load batches, and view cases.
-- **Reviewers** can also edit case status, record overrides, and view governance pages.
-- **Administrators** have reviewer access plus Django administration.
+- **Analysts** can score, load batches, and view cases they created or were assigned.
+- **Reviewers** can manage the case queue, record reviews and mature outcomes, and view governance pages.
+- **Legal officers** can view cases and monitoring and place or release documented legal holds; they cannot score, review, or change policy.
+- **Administrators** have reviewer and legal-hold access, approve or reject policy scenarios, and can use Django administration.
 
 ## Batch applicant loading
 
@@ -150,13 +199,27 @@ cb_person_cred_hist_length
 cb_person_default_on_file
 ```
 
-`applicant_reference` is optional. Use an internal case number, not a name,
-account number, or government identifier. Invalid rows are reported separately
-and are not scored.
+The `applicant_reference` column is required, but its row values may be blank.
+Use an internal case number, not a name, account number, or government
+identifier. Unknown columns are rejected. Invalid rows are reported separately
+and are not scored. Field definitions, ranges, category codes, cross-field
+checks, and file limits are in [the application input contract](docs/INPUT_CONTRACT.md).
+
+Local development processes rows inline. When `BATCH_PROCESS_INLINE=False`, run
+the durable worker as a separately supervised process:
+
+```bash
+python manage.py process_batches
+```
+
+Use `python manage.py process_batches --once` only for maintenance or smoke
+checks. The batch page reports queued, processing, failed, cancellation, and
+row-warning states; retrying retains already completed durable rows.
 
 ## Scoring API
 
-Set `SCORING_API_KEY`, then use:
+Add a client credential to `SCORING_API_KEYS` (the deprecated
+`SCORING_API_KEY` remains available during migration), then use:
 
 ```text
 POST /api/v1/score/
@@ -165,8 +228,9 @@ Idempotency-Key: <UUID>
 Content-Type: application/json
 ```
 
-Interactive documentation is at `/api/docs/`; the OpenAPI document is at
-`/api/v1/openapi.json`.
+The static quick reference is at `/api/docs/`; the machine-readable OpenAPI
+document is at `/api/v1/openapi.json` and can be imported into an approved
+interactive viewer or client generator.
 
 The endpoint uses the same validation contract as the web form, enforces a
 configurable per-minute limit, stores a case, and returns the same result when
@@ -178,14 +242,49 @@ latency and governance reasons.
 Compare incoming feature distributions with the training baseline:
 
 ```bash
-python -m src.monitor_model --data path/to/new_applicants.csv
+python -m src.monitor_model --data path/to/new_applicants.csv \
+  --output reports/drift_monitoring.csv
 ```
+
+For the deliberately unsigned bundled local demonstration only, add
+`--allow-unsigned-demo`. Approved deployments must omit that flag and use the
+signed active release.
+
+Preview a persisted monitoring run from the representative raw input CSV, then
+repeat with `--confirm` after review. The command recomputes drift itself and
+binds the result to the input digest and active model release:
+
+```bash
+python manage.py record_monitoring_run path/to/new_applicants.csv \
+  --window-start YYYY-MM-DD --window-end YYYY-MM-DD --as-of YYYY-MM-DD \
+  --owner "Model Risk"
+
+python manage.py record_monitoring_run path/to/new_applicants.csv \
+  --window-start YYYY-MM-DD --window-end YYYY-MM-DD --as-of YYYY-MM-DD \
+  --owner "Model Risk" --confirm
+```
+
+Import mature case outcomes from a controlled CSV feed with an active staff
+account. The first command is an atomic dry run; only the second persists
+immutable outcomes:
+
+```bash
+python manage.py import_outcomes outcomes.csv --actor reviewer_username
+python manage.py import_outcomes outcomes.csv --actor reviewer_username --confirm
+```
+
+The required outcome schema, label mapping, maturity rules, and monitoring
+runbook are documented in [the operations guide](docs/OPERATIONS.md#outcome-ingestion).
 
 Evaluate a labeled external or out-of-time sample:
 
 ```bash
 python -m src.validate_external --data path/to/mature_outcomes.csv
 ```
+
+Production commands require a signed release. For an isolated smoke test of the
+checked-in demo artifact, add `--allow-unsigned-demo`; never use that flag in a
+shared environment. See [ML Development and Release Contract](docs/ML_DEVELOPMENT.md).
 
 Preview or execute data retention:
 
@@ -200,10 +299,12 @@ Release retraining (only after data provenance approval):
 python -m src.train_model --release
 ```
 
-Add `--quick` only for an approved short release-validation run. The command
-requires a clean worktree, exactly one tag at `HEAD`, approved data provenance,
-and an Ed25519 private signing key supplied through a secret manager. The
-checked-in demonstration artifact is intentionally not eligible for scoring.
+`--quick` is intentionally rejected for release builds. The command requires a
+clean worktree, exactly one `model-v2.2.0` tag at `HEAD`, approved data
+provenance, and an Ed25519 private signing key supplied through a secret
+manager. The checked-in demonstration artifact remains eligible only for the
+explicit local demo mode; it cannot be promoted for shared or production
+scoring.
 
 ## Production configuration
 
@@ -213,17 +314,34 @@ Copy `.env.example` as a reference. Important settings include:
 |---|---|
 | `SECRET_KEY` | Django cryptographic secret |
 | `AUDIT_HMAC_KEY` | Separate key for applicant-feature fingerprints |
+| `AUDIT_HMAC_KEYS` | Active HMAC key followed by retained lookup keys during rotation, comma-separated |
 | `FIELD_ENCRYPTION_KEY` | Fernet key for persisted applicant fields |
+| `FIELD_ENCRYPTION_KEYS` | Active field key followed by retained read keys, comma-separated |
 | `BACKUP_ENCRYPTION_KEY` | Separate Fernet key for database backups |
 | `MODEL_SIGNING_PUBLIC_KEY` | Ed25519 public key used to verify model releases |
 | `DATABASE_URL` | PostgreSQL connection URL |
+| `DB_SSL_REQUIRE` | Require TLS parameters for the production database connection |
 | `LOGIN_REQUIRED` | Enforce staff authentication |
-| `SCORING_API_KEY` | Enable API scoring |
+| `SCORING_API_KEYS` | JSON map of per-client API secrets for independent attribution and rotation |
+| `SCORING_API_KEY` | Deprecated compatibility secret, exposed as client `legacy` |
 | `API_RATE_LIMIT_PER_MINUTE` | API request ceiling |
 | `CASE_RETENTION_DAYS` | Retention-command default |
 | `DATA_PROVENANCE_VERIFIED` | Enables only formally approved training data |
+| `LOCAL_DEMO_MODE` | Loads the hash-checked bundled model for local demonstrations only |
 | `MAX_BATCH_ROWS` | Batch row limit |
 | `MAX_UPLOAD_BYTES` | Upload size limit |
+| `MAX_XLSX_UNCOMPRESSED_BYTES` | Maximum total uncompressed XLSX payload (default 50 MiB) |
+| `MAX_XLSX_ARCHIVE_MEMBERS` | Maximum files inside an XLSX archive (default 2,000) |
+| `MEDIA_ROOT` / `MEDIA_URL` | Storage used only by legacy file-backed batches or future media features |
+| `MEDIA_STORAGE_BACKEND` | Backend for legacy/future media; new queued payloads are encrypted in the database |
+| `CASE_REVIEW_SLA_HOURS` | Hours before an open case is marked overdue (default 48) |
+| `CASE_PAGE_SIZE` | Cases displayed per page (default 50) |
+| `MONITORING_FRESHNESS_HOURS` | Maximum age of monitoring evidence before it is stale (default 24 hours) |
+| `MONITORING_MIN_SAMPLE_SIZE` | Minimum valid rows in a persisted monitoring window (default 100) |
+| `CURRENCY_CODE` | Optional approved ISO 4217 display code; blank uses neutral monetary units |
+| `BATCH_PROCESS_INLINE` | Process uploads synchronously only in development (defaults to `DEBUG`) |
+| `BATCH_LEASE_SECONDS` | Worker heartbeat lease before an interrupted batch is recovered (default 300) |
+| `BATCH_MAX_ATTEMPTS` | Maximum processing attempts before a batch remains failed (default 3) |
 
 Shared deployments must use PostgreSQL. SQLite is intentionally retained only
 for local single-user operation.
@@ -248,8 +366,17 @@ DATA_CARD.md           Data quality, representation, privacy, and provenance
 The externally owned production gates are tracked in
 `docs/GOVERNANCE_CHECKLIST.md`.
 Setup failures and removal steps are covered in `docs/TROUBLESHOOTING.md`.
+Staff workflows are documented in `docs/USER_GUIDE.md`. Historical interface
+images and the current screenshot checklist are described in `docs/images/README.md`.
+Optional view-context hooks for the enhanced product states are documented in
+`docs/FRONTEND_INTEGRATION.md`.
+The exact web, API, and batch schema is documented in
+`docs/INPUT_CONTRACT.md`.
 
 ## Verification
+
+Load the mandatory environment values as described in **Developer setup**, then
+run:
 
 ```bash
 python manage.py migrate
@@ -275,10 +402,16 @@ been independently confirmed.
 Real lending use still requires organization-specific work:
 
 - representative bank and product data with mature outcomes;
+- approved input currency, units, source timing, category definitions, and
+  authoritative outcome-label mapping;
 - approved PD/LGD/EAD and profitability assumptions;
 - independent model validation and change approval;
 - legal and fair-lending review using appropriate protected-class analysis;
 - validated, specific adverse-action reason mapping;
+- enterprise identity, MFA, access recertification, and tamper-evident audit
+  retention appropriate to the deployment;
+- authenticated or independently recomputed monitoring inputs and approved
+  alert/escalation ownership;
 - penetration testing, incident response, backups, and recovery exercises;
 - human staffing, service-level targets, override governance, and periodic review.
 

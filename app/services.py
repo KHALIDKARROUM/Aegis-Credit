@@ -9,6 +9,7 @@ import hmac
 import json
 import logging
 import uuid
+import zipfile
 from hmac import compare_digest
 from datetime import date
 from functools import lru_cache
@@ -21,9 +22,15 @@ import pandas as pd
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from django.conf import settings
-from django.core.cache import cache
+from django.db import transaction
+from django.utils import timezone
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.figure import Figure
+from src.feature_contract import model_feature_frame, with_canonical_derived_features
+from src.release_artifacts import (
+    ArtifactIntegrityError as ReleaseArtifactIntegrityError,
+    verified_report_paths,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -41,15 +48,16 @@ REPORT_ARTIFACTS = {
     "model_comparison.png",
     "permutation_importance.csv",
     "permutation_importance.png",
+    "risk_band_validation.csv",
     "threshold_analysis.csv",
     "threshold_tradeoff.png",
+    "threshold_uncertainty.csv",
     "confusion_matrix.png",
     "calibration_analysis.csv",
     "calibration_curve.png",
     "fairness_age_groups.csv",
     "threshold_selection_validation.csv",
     "metric_confidence_intervals.csv",
-    "drift_monitoring.csv",
 }
 
 COLUMN_LABELS = {
@@ -82,9 +90,33 @@ INTENT_LABELS = {
     "VENTURE": "Venture",
 }
 
+BATCH_INPUT_COLUMNS = [
+    "applicant_reference",
+    "person_age",
+    "person_income",
+    "person_emp_length",
+    "person_home_ownership",
+    "loan_amnt",
+    "loan_intent",
+    "cb_person_cred_hist_length",
+    "cb_person_default_on_file",
+]
+
 
 class ArtifactIntegrityError(RuntimeError):
     pass
+
+
+def load_model_manifest() -> dict[str, Any]:
+    if not MODEL_MANIFEST_PATH.exists():
+        raise FileNotFoundError("Model release manifest not found.")
+    manifest = json.loads(MODEL_MANIFEST_PATH.read_text(encoding="utf-8"))
+    if settings.LOCAL_DEMO_MODE:
+        if not MODEL_PATH.exists() or _sha256(MODEL_PATH) != str(manifest.get("model_sha256", "")):
+            raise ArtifactIntegrityError("Demonstration model does not match its manifest.")
+    else:
+        _verify_release_manifest(manifest)
+    return manifest
 
 
 def _sha256(path: Path) -> str:
@@ -133,13 +165,23 @@ def _release_artifact_path(manifest: dict[str, Any]) -> Path:
 
 @lru_cache(maxsize=1)
 def load_model_bundle() -> dict[str, Any]:
-    if not MODEL_PATH.exists():
-        raise FileNotFoundError(
-            "Model file not found. Run `python -m src.train_model --quick` from the project root first."
-        )
     if not MODEL_MANIFEST_PATH.exists():
-        raise FileNotFoundError("Model manifest not found. Regenerate the model artifacts.")
+        raise FileNotFoundError("Approved model release manifest not found.")
     manifest = json.loads(MODEL_MANIFEST_PATH.read_text(encoding="utf-8"))
+
+    if settings.LOCAL_DEMO_MODE:
+        if not MODEL_PATH.exists():
+            raise FileNotFoundError(
+                "Bundled demonstration model not found. Restore the checked-in demo artifact."
+            )
+        expected_hash = str(manifest.get("model_sha256", ""))
+        if not expected_hash or not compare_digest(_sha256(MODEL_PATH), expected_hash):
+            raise ArtifactIntegrityError("Demonstration model artifact integrity verification failed.")
+        bundle = joblib.load(MODEL_PATH)
+        if str(bundle.get("model_version")) != str(manifest.get("model_version")):
+            raise ArtifactIntegrityError("Demonstration model version does not match its manifest.")
+        return bundle
+
     _verify_release_manifest(manifest)
     artifact_path = _release_artifact_path(manifest)
     expected_hash = str(manifest.get("model_sha256", ""))
@@ -151,19 +193,29 @@ def load_model_bundle() -> dict[str, Any]:
         raise ArtifactIntegrityError("Model version does not match its manifest.")
     if bundle.get("git_dirty") is not False or bundle.get("git_tag") != manifest.get("git_tag"):
         raise ArtifactIntegrityError("Model bundle release metadata does not match its manifest.")
+    coherence_fields = ("features", "feature_contract_version", "threshold", "data_sha256")
+    for field in coherence_fields:
+        if bundle.get(field) != manifest.get(field):
+            raise ArtifactIntegrityError(
+                f"Model bundle {field} does not match its signed release manifest."
+            )
     return bundle
 
 
 @lru_cache(maxsize=1)
 def load_credit_data() -> pd.DataFrame:
-    if not settings.DATA_PROVENANCE_VERIFIED:
+    if not settings.DATA_PROVENANCE_VERIFIED and not settings.LOCAL_DEMO_MODE:
         raise ArtifactIntegrityError("Unverified demonstration data cannot be loaded operationally.")
+    manifest = json.loads(MODEL_MANIFEST_PATH.read_text(encoding="utf-8"))
+    expected_hash = str(manifest.get("data_sha256", ""))
+    if not expected_hash or not compare_digest(_sha256(DATA_PATH), expected_hash):
+        raise ArtifactIntegrityError("Dataset does not match the model release manifest.")
     return pd.read_csv(DATA_PATH)
 
 
 @lru_cache(maxsize=None)
 def load_report_csv(file_name: str) -> pd.DataFrame:
-    path = REPORTS_DIR / file_name
+    path = _report_path(file_name)
     if not path.exists():
         return pd.DataFrame()
     return pd.read_csv(path)
@@ -171,10 +223,32 @@ def load_report_csv(file_name: str) -> pd.DataFrame:
 
 @lru_cache(maxsize=None)
 def load_text_report(file_name: str) -> str:
-    path = REPORTS_DIR / file_name
+    path = _report_path(file_name)
     if not path.exists():
         return ""
     return path.read_text(encoding="utf-8")
+
+
+@lru_cache(maxsize=None)
+def _report_path(file_name: str) -> Path:
+    if file_name not in REPORT_ARTIFACTS:
+        raise ArtifactIntegrityError("Report artifact is not allowlisted.")
+    if settings.LOCAL_DEMO_MODE:
+        # The checked-in 2.1 demo's threshold_analysis.csv was produced from
+        # final-test predictions. Never expose it as an interactive/tunable
+        # policy surface; use the dedicated validation partition instead.
+        if file_name == "threshold_analysis.csv":
+            return REPORTS_DIR / "threshold_selection_validation.csv"
+        return REPORTS_DIR / file_name
+    manifest = json.loads(MODEL_MANIFEST_PATH.read_text(encoding="utf-8"))
+    _verify_release_manifest(manifest)
+    try:
+        paths = verified_report_paths(manifest, models_dir=MODEL_MANIFEST_PATH.parent)
+    except ReleaseArtifactIntegrityError as exc:
+        raise ArtifactIntegrityError(str(exc)) from exc
+    if file_name not in paths:
+        raise ArtifactIntegrityError(f"Release manifest does not cover report {file_name}.")
+    return paths[file_name]
 
 
 def predict_default_probability(bundle: dict[str, Any], application: pd.DataFrame) -> float:
@@ -224,7 +298,9 @@ def format_score(value: float) -> str:
 
 
 def format_money(value: float) -> str:
-    return f"${value:,.0f}"
+    if settings.CURRENCY_CODE:
+        return f"{settings.CURRENCY_CODE} {value:,.0f}"
+    return f"{value:,.0f} monetary units"
 
 
 def display_date() -> str:
@@ -429,7 +505,8 @@ def dashboard_data() -> dict[str, Any]:
     data = load_credit_data()
     comparison = load_report_csv("model_comparison.csv")
     final_metrics = load_report_csv("final_model_metrics.csv")
-    threshold_table = load_report_csv("threshold_analysis.csv")
+    # Policy exploration must never tune against the locked final-test table.
+    threshold_table = load_report_csv("threshold_selection_validation.csv")
     calibration = load_report_csv("calibration_analysis.csv")
     fairness = load_report_csv("fairness_age_groups.csv")
     importance = get_importance(bundle)
@@ -498,12 +575,14 @@ def application_from_cleaned_data(
     bundle: dict[str, Any],
     cleaned_data: dict[str, Any],
 ) -> tuple[dict[str, Any], pd.DataFrame]:
-    values = dict(cleaned_data)
-    income = float(values["person_income"])
-    loan_percent_income = float(values["loan_amnt"]) / income
-    values["loan_percent_income"] = float(round(loan_percent_income, 4))
-
-    application = pd.DataFrame([values])[bundle["features"]]
+    raw = pd.DataFrame([cleaned_data])
+    values = with_canonical_derived_features(raw).iloc[0].to_dict()
+    application = model_feature_frame(raw)
+    expected_features = list(bundle["features"])
+    if list(application.columns) != expected_features:
+        raise ArtifactIntegrityError(
+            "The model feature order does not match the canonical serving contract."
+        )
     return values, application
 
 
@@ -583,8 +662,8 @@ def assessment_result(
         "decision": decision,
         "decision_detail": decision_detail,
         "probability_context": (
-            f"About {round(probability * 100)} out of 100 similar past applications "
-            "experienced repayment difficulty."
+            "This is a model score, not a frequency for a matched peer group. "
+            "It requires validation against mature outcomes before operational interpretation."
         ),
         "threshold": threshold,
         "snapshot": snapshot,
@@ -599,6 +678,14 @@ def assessment_result(
     }
 
 
+def _hmac_digest(payload: str, key: str | None = None) -> str:
+    return hmac.new(
+        (key or settings.AUDIT_HMAC_KEY).encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
 def feature_digest(application: pd.DataFrame) -> str:
     payload = json.dumps(
         application.iloc[0].to_dict(),
@@ -606,11 +693,127 @@ def feature_digest(application: pd.DataFrame) -> str:
         default=str,
         separators=(",", ":"),
     )
-    return hmac.new(
-        settings.AUDIT_HMAC_KEY.encode("utf-8"),
-        payload.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
+    return _hmac_digest(payload)
+
+
+def request_digest(result: dict[str, Any]) -> str:
+    """Bind an idempotency key to the normalized request that produced it."""
+    return request_digests(result)[0]
+
+
+def request_digests(result: dict[str, Any]) -> list[str]:
+    """Return active and retained-key request digests during HMAC rotation."""
+    payload = {
+        "applicant_reference": str(result.get("applicant_reference", "")).strip(),
+        "application": result["application"].iloc[0].to_dict(),
+    }
+    canonical = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+    return [_hmac_digest(canonical, key) for key in settings.AUDIT_HMAC_KEYS]
+
+
+def reference_digest(reference: str) -> str:
+    return reference_digests(reference)[0]
+
+
+def reference_digests(reference: str) -> list[str]:
+    """Return active and retained-key reference digests during HMAC rotation."""
+    normalized = reference.strip().casefold()
+    return [_hmac_digest(normalized, key) for key in settings.AUDIT_HMAC_KEYS]
+
+
+def outcome_performance_table(outcomes: Any) -> pd.DataFrame:
+    """Calculate delayed-label performance by immutable model release."""
+    from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
+
+    records = []
+    for outcome in outcomes:
+        case = outcome.case
+        records.append(
+            {
+                "model_version": case.model_version,
+                "model_release_id": case.model_release_id or "unclassified",
+                "deployment_stage": case.deployment_stage,
+                "probability": float(case.probability),
+                "defaulted": (
+                    1
+                    if outcome.outcome
+                    in {outcome.Outcome.DEFAULTED, outcome.Outcome.CHARGED_OFF}
+                    else 0
+                    if outcome.outcome == outcome.Outcome.PERFORMING
+                    else None
+                ),
+                "loss_amount": float(outcome.loss_amount or 0),
+            }
+        )
+    columns = [
+        "model_version",
+        "model_release_id",
+        "deployment_stage",
+        "total_outcomes",
+        "mature_outcomes",
+        "indeterminate_outcomes",
+        "observed_default_rate",
+        "default_rate_ci_lower",
+        "default_rate_ci_upper",
+        "mean_score",
+        "calibration_gap",
+        "brier_score",
+        "roc_auc",
+        "average_precision",
+        "realized_loss",
+        "evidence_status",
+    ]
+    if not records:
+        return pd.DataFrame(columns=columns)
+    frame = pd.DataFrame(records)
+    rows: list[dict[str, Any]] = []
+    group_keys = ["model_version", "model_release_id", "deployment_stage"]
+    for keys, group in frame.groupby(group_keys, dropna=False):
+        mature = group[group["defaulted"].notna()].copy()
+        labels = mature["defaulted"].astype(int)
+        scores = mature["probability"].astype(float)
+        sample_size = len(mature)
+        if sample_size == 0:
+            rows.append(
+                {
+                    **dict(zip(group_keys, keys, strict=True)),
+                    "total_outcomes": len(group),
+                    "mature_outcomes": 0,
+                    "indeterminate_outcomes": len(group),
+                    "realized_loss": 0.0,
+                    "evidence_status": "no_mature_labels",
+                }
+            )
+            continue
+        both_classes = labels.nunique() == 2
+        observed_rate = float(labels.mean())
+        z = 1.96
+        denominator = 1 + z**2 / sample_size
+        centre = (observed_rate + z**2 / (2 * sample_size)) / denominator
+        radius = (
+            z
+            * ((observed_rate * (1 - observed_rate) / sample_size + z**2 / (4 * sample_size**2)) ** 0.5)
+            / denominator
+        )
+        rows.append(
+            {
+                **dict(zip(group_keys, keys, strict=True)),
+                "total_outcomes": len(group),
+                "mature_outcomes": sample_size,
+                "indeterminate_outcomes": len(group) - sample_size,
+                "observed_default_rate": observed_rate,
+                "default_rate_ci_lower": max(0.0, centre - radius),
+                "default_rate_ci_upper": min(1.0, centre + radius),
+                "mean_score": scores.mean(),
+                "calibration_gap": scores.mean() - labels.mean(),
+                "brier_score": brier_score_loss(labels, scores),
+                "roc_auc": roc_auc_score(labels, scores) if both_classes else None,
+                "average_precision": average_precision_score(labels, scores) if both_classes else None,
+                "realized_loss": mature["loss_amount"].sum(),
+                "evidence_status": "insufficient" if sample_size < 100 else "monitor",
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
 
 
 def json_safe_application(result: dict[str, Any]) -> dict[str, Any]:
@@ -633,26 +836,40 @@ def api_rate_limit_exceeded(identifier: str) -> bool:
     limit = settings.API_RATE_LIMIT_PER_MINUTE
     if limit <= 0:
         return False
-    bucket = int(__import__("time").time() // 60)
-    key = f"score-rate:{hashlib.sha256(identifier.encode('utf-8')).hexdigest()}:{bucket}"
-    try:
-        current = cache.incr(key)
-    except ValueError:
-        cache.set(key, 1, timeout=70)
-        current = 1
-    return current > limit
+    from .models import ApiRateLimitBucket
+
+    window_start = timezone.now().replace(second=0, microsecond=0)
+    key_digest = hashlib.sha256(identifier.encode("utf-8")).hexdigest()
+    with transaction.atomic():
+        bucket, _ = ApiRateLimitBucket.objects.select_for_update().get_or_create(
+            key_digest=key_digest,
+            window_start=window_start,
+            defaults={"request_count": 0},
+        )
+        if bucket.request_count >= limit:
+            return True
+        bucket.request_count += 1
+        bucket.save(update_fields=["request_count"])
+    return False
 
 
 def read_batch_upload(upload: Any) -> pd.DataFrame:
     suffix = Path(upload.name).suffix.lower()
     if suffix == ".csv":
-        frame = pd.read_csv(upload)
+        frame = pd.read_csv(upload, nrows=settings.MAX_BATCH_ROWS + 1)
     elif suffix == ".xlsx":
+        _validate_xlsx_archive(upload)
         frame = pd.read_excel(upload, engine="openpyxl")
     else:
         raise ValueError("Unsupported file type.")
 
     frame.columns = [str(column).strip() for column in frame.columns]
+    missing = sorted(set(BATCH_INPUT_COLUMNS) - set(frame.columns))
+    unknown = sorted(set(frame.columns) - set(BATCH_INPUT_COLUMNS))
+    if missing:
+        raise ValueError("The batch is missing required columns: " + ", ".join(missing))
+    if unknown:
+        raise ValueError("The batch contains unknown columns: " + ", ".join(unknown))
     if len(frame) > settings.MAX_BATCH_ROWS:
         raise ValueError(
             f"The file contains {len(frame):,} rows; the current limit is "
@@ -661,22 +878,35 @@ def read_batch_upload(upload: Any) -> pd.DataFrame:
     return frame
 
 
+def _validate_xlsx_archive(upload: Any) -> None:
+    """Reject oversized or suspicious XLSX archives before XML decompression."""
+    upload.seek(0)
+    try:
+        with zipfile.ZipFile(upload) as archive:
+            members = archive.infolist()
+            if len(members) > settings.MAX_XLSX_ARCHIVE_MEMBERS:
+                raise ValueError("The Excel workbook contains too many internal files.")
+            total_size = 0
+            for member in members:
+                member_path = Path(member.filename)
+                if member_path.is_absolute() or ".." in member_path.parts:
+                    raise ValueError("The Excel workbook contains an unsafe internal path.")
+                total_size += member.file_size
+                if member.compress_size and member.file_size / member.compress_size > 200:
+                    raise ValueError("The Excel workbook has an unsafe compression ratio.")
+            if total_size > settings.MAX_XLSX_UNCOMPRESSED_BYTES:
+                raise ValueError("The expanded Excel workbook exceeds the safety limit.")
+    except zipfile.BadZipFile as exc:
+        raise ValueError("The uploaded Excel workbook is not a valid .xlsx file.") from exc
+    finally:
+        upload.seek(0)
+
+
 def batch_template_csv() -> str:
-    columns = [
-        "applicant_reference",
-        "person_age",
-        "person_income",
-        "person_emp_length",
-        "person_home_ownership",
-        "loan_amnt",
-        "loan_intent",
-        "cb_person_cred_hist_length",
-        "cb_person_default_on_file",
-    ]
     example = ["APP-001", 30, 65000, 5, "RENT", 8000, "PERSONAL", 6, "N"]
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    writer.writerow(columns)
+    writer.writerow(BATCH_INPUT_COLUMNS)
     writer.writerow(example)
     return buffer.getvalue()
 
@@ -690,6 +920,8 @@ def batch_results_csv(results: list[dict[str, Any]]) -> str:
         "probability",
         "risk_category",
         "recommended_next_step",
+        "model_version",
+        "deployment_stage",
         "warnings",
         "errors",
     ]
@@ -697,14 +929,21 @@ def batch_results_csv(results: list[dict[str, Any]]) -> str:
     writer = csv.DictWriter(buffer, fieldnames=columns)
     writer.writeheader()
     for row in results:
-        writer.writerow(
-            {
-                **{column: row.get(column, "") for column in columns},
-                "warnings": " | ".join(row.get("warnings", [])),
-                "errors": " | ".join(row.get("errors", [])),
-            }
-        )
+        output = {
+            **{column: row.get(column, "") for column in columns},
+            "warnings": " | ".join(row.get("warnings", [])),
+            "errors": " | ".join(row.get("errors", [])),
+        }
+        writer.writerow({key: spreadsheet_safe(value) for key, value in output.items()})
     return buffer.getvalue()
+
+
+def spreadsheet_safe(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    if value.startswith(("=", "+", "-", "@", "\t", "\r")):
+        return "'" + value
+    return value
 
 
 def business_economics(
@@ -714,6 +953,9 @@ def business_economics(
     loss_given_default: float,
     annual_margin: float,
     review_cost: float,
+    review_abandonment_rate: float = 0.02,
+    downstream_default_catch_rate: float = 0.50,
+    review_capacity: int | None = None,
 ) -> dict[str, Any]:
     if threshold_table.empty:
         return {"table": pd.DataFrame(), "recommended": {}, "assumptions": {}}
@@ -727,20 +969,31 @@ def business_economics(
         + working["true_positives"]
     )
     working["review_rate"] = working["flagged_applications"] / population
-    working["missed_default_loss"] = (
-        working["false_negatives"] * average_exposure * loss_given_default
-    )
+    working["missed_default_loss"] = working["false_negatives"] * (
+        1 - downstream_default_catch_rate
+    ) * average_exposure * loss_given_default
     working["manual_review_cost"] = working["flagged_applications"] * review_cost
     working["false_positive_opportunity_cost"] = (
-        working["false_positives"] * average_exposure * annual_margin
+        working["false_positives"]
+        * review_abandonment_rate
+        * average_exposure
+        * annual_margin
     )
     working["estimated_total_cost"] = (
         working["missed_default_loss"]
         + working["manual_review_cost"]
         + working["false_positive_opportunity_cost"]
     )
+    if review_capacity is not None:
+        working["within_review_capacity"] = working["flagged_applications"] <= review_capacity
+        eligible = working[working["within_review_capacity"]]
+    else:
+        working["within_review_capacity"] = True
+        eligible = working
+    if eligible.empty:
+        eligible = working
     recommended = (
-        working.sort_values(
+        eligible.sort_values(
             ["estimated_total_cost", "recall", "precision"],
             ascending=[True, False, False],
         )
@@ -755,6 +1008,9 @@ def business_economics(
             "loss_given_default": loss_given_default,
             "annual_margin": annual_margin,
             "review_cost": review_cost,
+            "review_abandonment_rate": review_abandonment_rate,
+            "downstream_default_catch_rate": downstream_default_catch_rate,
+            "review_capacity": review_capacity,
         },
     }
 
@@ -763,13 +1019,13 @@ def openapi_schema() -> dict[str, Any]:
     properties = {
         "applicant_reference": {"type": "string", "maxLength": 80},
         "person_age": {"type": "integer", "minimum": 18, "maximum": 100},
-        "person_income": {"type": "integer", "minimum": 1},
-        "person_emp_length": {"type": "number", "minimum": 0},
+        "person_income": {"type": "integer", "minimum": 1, "maximum": 2_000_000},
+        "person_emp_length": {"type": "number", "minimum": 0, "maximum": 60},
         "person_home_ownership": {
             "type": "string",
             "enum": ["MORTGAGE", "OTHER", "OWN", "RENT"],
         },
-        "loan_amnt": {"type": "integer", "minimum": 500},
+        "loan_amnt": {"type": "integer", "minimum": 500, "maximum": 500_000},
         "loan_intent": {
             "type": "string",
             "enum": [
@@ -781,7 +1037,7 @@ def openapi_schema() -> dict[str, Any]:
                 "VENTURE",
             ],
         },
-        "cb_person_cred_hist_length": {"type": "integer", "minimum": 0},
+        "cb_person_cred_hist_length": {"type": "integer", "minimum": 0, "maximum": 50},
         "cb_person_default_on_file": {"type": "string", "enum": ["N", "Y"]},
     }
     return {
@@ -813,6 +1069,7 @@ def openapi_schema() -> dict[str, Any]:
                             "application/json": {
                                 "schema": {
                                     "type": "object",
+                                    "additionalProperties": False,
                                     "required": [
                                         key for key in properties if key != "applicant_reference"
                                     ],
@@ -822,9 +1079,17 @@ def openapi_schema() -> dict[str, Any]:
                         },
                     },
                     "responses": {
-                        "200": {"description": "Versioned screening result"},
-                        "400": {"description": "Validation error"},
-                        "401": {"description": "Invalid API key"},
+                        "200": {
+                            "description": "Versioned screening result",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ScoreResult"}}},
+                        },
+                        "400": {
+                            "description": "Validation error",
+                            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}},
+                        },
+                        "401": {"description": "Invalid API credential"},
+                        "409": {"description": "Idempotency key reused with different input"},
+                        "422": {"description": "Valid input is materially outside the supported model domain"},
                         "429": {"description": "Rate limit exceeded"},
                         "503": {"description": "API or model unavailable"},
                     },
@@ -835,7 +1100,35 @@ def openapi_schema() -> dict[str, Any]:
             "securitySchemes": {
                 "ApiKeyAuth": {"type": "apiKey", "in": "header", "name": "X-API-Key"},
                 "BearerAuth": {"type": "http", "scheme": "bearer"},
-            }
+            },
+            "schemas": {
+                "ScoreResult": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "case_id", "model_version", "probability", "risk_category",
+                        "screening_result", "recommended_next_step", "threshold", "warnings",
+                    ],
+                    "properties": {
+                        "case_id": {"type": "string", "format": "uuid"},
+                        "model_version": {"type": "string"},
+                        "probability": {"type": "number", "minimum": 0, "maximum": 1},
+                        "risk_category": {"type": "string", "enum": ["Low", "Medium", "High"]},
+                        "screening_result": {"type": "string"},
+                        "recommended_next_step": {"type": "string"},
+                        "threshold": {"type": "number", "minimum": 0, "maximum": 1},
+                        "warnings": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+                "Error": {
+                    "type": "object",
+                    "required": ["error"],
+                    "properties": {
+                        "error": {"type": "string"},
+                        "fields": {"type": "object", "additionalProperties": True},
+                    },
+                },
+            },
         },
     }
 
@@ -1051,7 +1344,7 @@ def policy_applicant_explanations(form: dict[str, Any]) -> list[dict[str, str]]:
 def report_artifact_path(file_name: str) -> Path | None:
     if file_name not in REPORT_ARTIFACTS:
         return None
-    path = REPORTS_DIR / file_name
+    path = _report_path(file_name)
     return path if path.exists() else None
 
 
@@ -1072,7 +1365,7 @@ def report_summary(dashboard: dict[str, Any]) -> dict[str, Any]:
             {"label": "Trained", "value": metadata["trained_at"]},
             {"label": "F1-score", "value": format_score(float(dashboard["best_f1"]))},
             {"label": "ROC-AUC", "value": format_score(float(default_metrics["roc_auc"]))},
-            {"label": "Model type", "value": "Calibrated leakage-safe Pipeline"},
+            {"label": "Model type", "value": "Calibrated application-time pipeline"},
         ],
         "dataset_summary": [
             {"label": "Applicants", "value": f"{len(data):,}"},
@@ -1085,6 +1378,20 @@ def report_summary(dashboard: dict[str, Any]) -> dict[str, Any]:
             {"label": "Business recall", "value": format_score(float(business_metrics["recall"]))},
             {"label": "Business F1-score", "value": format_score(float(business_metrics["f1_score"]))},
             {"label": "Business cost", "value": f"{int(threshold_row.get('business_cost', 0)):,}"},
+        ],
+        "release_summary": [
+            {
+                "label": "Deployment stage",
+                "value": "LOCAL DEMONSTRATION" if settings.LOCAL_DEMO_MODE else "APPROVED RELEASE",
+            },
+            {
+                "label": "Use restriction",
+                "value": (
+                    "Not approved for lending decisions"
+                    if settings.LOCAL_DEMO_MODE
+                    else "Human-review decision support only"
+                ),
+            },
         ],
         "confusion": [
             {
@@ -1099,9 +1406,9 @@ def report_summary(dashboard: dict[str, Any]) -> dict[str, Any]:
             },
         ],
         "business_recommendation": (
-            "Use the recommended threshold only for screening and route flagged applications to "
-            "human review. The production scoring path excludes lender-assigned grade and pricing; "
-            "review calibration, drift, and subgroup diagnostics before operational use."
+            "Threshold economics are illustrative validation scenarios, not an approval policy. "
+            "Any operational policy requires independent validation, capacity evidence, formal "
+            "approval, and a separately signed release."
         ),
     }
 
@@ -1111,7 +1418,7 @@ def summary_csv(dashboard: dict[str, Any]) -> str:
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow(["section", "metric", "value"])
-    for section in ("model_summary", "dataset_summary", "threshold_summary"):
+    for section in ("release_summary", "model_summary", "dataset_summary", "threshold_summary"):
         for row in summary[section]:
             writer.writerow([section, row["label"], row["value"]])
     writer.writerow(["business_recommendation", "recommendation", summary["business_recommendation"]])
@@ -1130,9 +1437,20 @@ def summary_pdf(dashboard: dict[str, Any]) -> bytes:
         axis.text(0.05, y, "BankRisk Compass Report", fontsize=18, fontweight="bold", color="#071942")
         y -= 0.055
         axis.text(0.05, y, f"Generated: {display_date()}", fontsize=10, color="#60708d")
+        if settings.LOCAL_DEMO_MODE:
+            y -= 0.035
+            axis.text(
+                0.05,
+                y,
+                "LOCAL DEMONSTRATION - NOT APPROVED FOR LENDING DECISIONS",
+                fontsize=10,
+                fontweight="bold",
+                color="#a12622",
+            )
         y -= 0.06
 
         for title, section in [
+            ("Release Status", "release_summary"),
             ("Model Summary", "model_summary"),
             ("Dataset Summary", "dataset_summary"),
             ("Threshold Summary", "threshold_summary"),

@@ -106,9 +106,36 @@ class ServiceTests(SimpleTestCase):
         super().setUpClass()
         cls.bundle = test_model_bundle()
 
+    @override_settings(LOCAL_DEMO_MODE=False, DATA_PROVENANCE_VERIFIED=False)
     def test_unreleased_model_is_rejected_by_runtime_loader(self) -> None:
-        with self.assertRaises(services.ArtifactIntegrityError):
-            services.load_model_bundle()
+        services.load_model_bundle.cache_clear()
+        try:
+            with self.assertRaises(services.ArtifactIntegrityError):
+                services.load_model_bundle()
+        finally:
+            services.load_model_bundle.cache_clear()
+
+    @override_settings(LOCAL_DEMO_MODE=True)
+    def test_local_demo_mode_loads_hash_checked_bundled_model(self) -> None:
+        services.load_model_bundle.cache_clear()
+        try:
+            bundle = services.load_model_bundle()
+            self.assertEqual(bundle["model_version"], "2.1.0")
+        finally:
+            services.load_model_bundle.cache_clear()
+
+    @override_settings(LOCAL_DEMO_MODE=True)
+    @patch("app.services._sha256", return_value="0" * 64)
+    def test_local_demo_mode_rejects_model_hash_mismatch(self, _sha256) -> None:
+        services.load_model_bundle.cache_clear()
+        try:
+            with self.assertRaisesRegex(
+                services.ArtifactIntegrityError,
+                "integrity verification failed",
+            ):
+                services.load_model_bundle()
+        finally:
+            services.load_model_bundle.cache_clear()
 
     def test_bundle_has_governance_metadata(self) -> None:
         for key in (
@@ -258,10 +285,16 @@ class DashboardViewTests(TestCase):
         self.assertNotContains(response, "Model v")
 
     def test_home_page_is_the_client_assessment(self) -> None:
-        response = self.client.get(reverse("overview"))
+        response = self.client.get(reverse("assessment"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Show assessment")
         self.assertContains(response, "People stay in control")
+
+    @override_settings(LOCAL_DEMO_MODE=True)
+    def test_local_demo_mode_is_clearly_labelled(self) -> None:
+        response = self.client.get(reverse("assessment"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Local demo")
 
     def test_operational_pages_are_available_in_local_mode(self) -> None:
         for route_name in (
@@ -432,10 +465,12 @@ class DashboardViewTests(TestCase):
         response = self.client.post(
             reverse("case-detail", args=[case.id]),
             {
-                "status": AssessmentCase.Status.IN_REVIEW,
-                "reviewer_notes": "",
-                "override_decision": AssessmentCase.OverrideDecision.MANUAL,
-                "override_reason": "",
+                "form_action": "review",
+                "review-expected_version": case.review_version,
+                "review-status": AssessmentCase.Status.IN_REVIEW,
+                "review-reviewer_notes": "",
+                "review-override_decision": AssessmentCase.OverrideDecision.MANUAL,
+                "review-override_reason": "",
             },
         )
         self.assertEqual(response.status_code, 200)

@@ -9,20 +9,44 @@
         <h1>Business threshold scenario</h1>
         <p>Replace the illustrative 5:1 error ratio with explicit financial assumptions.</p>
     </div>
+    <div class="page-actions">
+        <a class="secondary-button" href="{% url 'threshold' %}">View threshold trade-off</a>
+        {% if policy_scenario_export_url %}<a class="text-button" href="{{ policy_scenario_export_url }}">Export scenario</a>{% endif %}
+    </div>
 </section>
+
+{% if policy_scenario_status %}
+<section class="status-banner {{ policy_scenario_status_tone|default:'neutral' }}" role="status">
+    <strong>{{ policy_scenario_status }}</strong>
+    {% if policy_scenario_updated_at %}<span>Updated {{ policy_scenario_updated_at }}</span>{% endif %}
+</section>
+{% endif %}
+
+{% if scenario_is_illustrative %}
+<section class="status-banner warning" role="status">
+    <strong>Scenario outputs are illustrative.</strong>
+    <span>Saving or approving a scenario records governance evidence; it does not update the deployed scoring threshold.</span>
+</section>
+{% endif %}
 
 <section class="dashboard-grid split-wide">
     <article class="panel data-panel">
-        <form method="get" class="review-form">
-            {% for field in economics_form %}
+        <form method="post" class="review-form">
+            {% csrf_token %}
+            {{ economics_form.non_field_errors }}
+            {% for hidden in economics_form.hidden_fields %}{{ hidden }}{% endfor %}
+            {% for field in economics_form.visible_fields %}
                 <div class="field-group">
                     <label for="{{ field.id_for_label }}">{{ field.label }}</label>
                     {{ field }}
-                    <span class="field-hint">{{ field.help_text }}</span>
-                    {% for error in field.errors %}<span class="field-error">{{ error }}</span>{% endfor %}
+                    {% if field.help_text %}<span class="field-hint" id="{{ field.id_for_label }}_helptext">{{ field.help_text }}</span>{% endif %}
+                    {% for error in field.errors %}<span class="field-error" id="{{ field.id_for_label }}_error_{{ forloop.counter }}" role="alert">{{ error }}</span>{% endfor %}
                 </div>
             {% endfor %}
-            <button class="primary-button" type="submit">Calculate scenario</button>
+            <div class="form-actions wide-field">
+                <button class="secondary-button" type="submit" name="form_action" value="calculate">Calculate scenario</button>
+                <button class="primary-button" type="submit" name="form_action" value="save">Save draft scenario</button>
+            </div>
         </form>
     </article>
     <article class="panel recommendation-panel">
@@ -40,9 +64,74 @@
 </section>
 
 <section class="panel data-panel">
+    <div class="card-heading">
+        <div>
+            <h2>Saved policy scenarios</h2>
+            <p>Versioned assumptions and decisions remain separate from the deployed model release.</p>
+        </div>
+    </div>
+    <div class="table-wrap">
+        <table class="data-table scenario-table">
+            <caption class="sr-only">Saved policy threshold scenarios and their governance status</caption>
+            <thead>
+                <tr>
+                    <th scope="col">Scenario</th>
+                    <th scope="col">Version</th>
+                    <th scope="col">Model</th>
+                    <th scope="col">Recommended threshold</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Created</th>
+                    <th scope="col">Owner / approver</th>
+                    <th scope="col">Governance action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for scenario in policy_scenarios %}
+                <tr>
+                    <th scope="row">{{ scenario.name }}</th>
+                    <td>{{ scenario.version }}</td>
+                    <td>{{ scenario.model_version }}</td>
+                    <td>{% if scenario.results.recommended.threshold != None %}{{ scenario.results.recommended.threshold|floatformat:2 }}{% else %}—{% endif %}</td>
+                    <td><span class="status-pill {{ scenario.status }}">{{ scenario.get_status_display }}</span></td>
+                    <td>{{ scenario.created_at|date:"Y-m-d H:i" }}</td>
+                    <td>
+                        {% if scenario.approved_by %}Approved by {{ scenario.approved_by.get_username }}
+                        {% elif scenario.created_by %}Created by {{ scenario.created_by.get_username }}
+                        {% else %}System record{% endif %}
+                    </td>
+                    <td>
+                        {% if product_role == "admin" and scenario.status == "draft" %}
+                        <form method="post" action="{% url 'policy-scenario-decision' scenario.id %}" class="scenario-decision-form">
+                            {% csrf_token %}
+                            <label class="sr-only" for="scenario-reason-{{ scenario.id }}">Decision reason for {{ scenario.name }} version {{ scenario.version }}</label>
+                            <textarea id="scenario-reason-{{ scenario.id }}" name="reason" rows="2" minlength="10" required placeholder="Record the approval or rejection rationale"></textarea>
+                            <div class="decision-actions">
+                                <button class="secondary-button" type="submit" name="decision" value="approved">Approve</button>
+                                <button class="danger-button" type="submit" name="decision" value="rejected">Reject</button>
+                            </div>
+                        </form>
+                        {% elif scenario.status == "draft" %}
+                            Pending administrator decision
+                        {% elif scenario.approved_at %}
+                            Decided {{ scenario.approved_at|date:"Y-m-d H:i" }}
+                        {% else %}
+                            Decision recorded
+                        {% endif %}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="8">No saved scenarios are available. Name the assumptions above and save a draft for independent review.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="panel data-panel">
     <div class="table-wrap tall">
         <table class="data-table">
-            <thead><tr>{% for column in economics_table.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead>
+            <caption class="sr-only">Estimated policy cost and performance at each candidate threshold</caption>
+            <thead><tr>{% for column in economics_table.columns %}<th scope="col">{{ column }}</th>{% endfor %}</tr></thead>
             <tbody>{% for row in economics_table.rows %}<tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>{% endfor %}</tbody>
         </table>
     </div>

@@ -10,10 +10,10 @@
     <script src="{% static 'app/app.js' %}" defer></script>
 </head>
 <body>
-    <a class="skip-link" href="#main-content">Skip to the assessment</a>
+    <a class="skip-link" href="#main-content">{{ skip_link_text|default:"Skip to main content" }}</a>
 
     <header class="topbar">
-        <a class="brand" href="{% url 'overview' %}" aria-label="BankRisk Compass home">
+        <a class="brand" href="{% url 'assessment' %}" aria-label="BankRisk Compass new assessment">
             <span class="brand-mark" aria-hidden="true">
                 <span class="brand-needle"></span>
             </span>
@@ -24,30 +24,43 @@
         </a>
 
         <nav class="topnav" aria-label="Main navigation">
-            {% for item in pages %}
-                <a class="{% if item.key == active_page %}active{% endif %}" href="{% url item.url_name %}" {% if item.key == active_page %}aria-current="page"{% endif %}>
-                    {{ item.label }}
-                </a>
-            {% endfor %}
+            {% if product_shell_ready %}
+                {% for item in product_nav_items %}
+                    <a class="{% if item.key == active_page %}active{% endif %}" href="{% url item.url_name %}" {% if item.key == active_page %}aria-current="page"{% endif %}>
+                        {{ item.label }}
+                    </a>
+                {% endfor %}
+            {% else %}
+                {% for item in pages %}
+                    <a class="{% if item.key == active_page %}active{% endif %}" href="{% url item.url_name %}" {% if item.key == active_page %}aria-current="page"{% endif %}>
+                        {{ item.label }}
+                    </a>
+                {% endfor %}
+            {% endif %}
         </nav>
 
         <div class="account-actions">
+            <div class="service-status {{ workspace_badge_tone|default:'workspace' }}" aria-label="Workspace mode">
+                <span class="status-dot" aria-hidden="true"></span>
+                {% if workspace_badge_label %}
+                    {{ workspace_badge_label }}
+                {% elif local_demo_mode %}
+                    Local demo
+                {% else %}
+                    Local workspace
+                {% endif %}
+            </div>
             {% if user.is_authenticated %}
-                <span>{{ user.get_username }}</span>
+                <span class="account-name">{{ user.get_username }}</span>
                 <form method="post" action="{% url 'logout' %}">
                     {% csrf_token %}
                     <button class="text-button" type="submit">Sign out</button>
                 </form>
-            {% else %}
-                <div class="service-status">
-                    <span class="status-dot" aria-hidden="true"></span>
-                    Local workspace
-                </div>
             {% endif %}
         </div>
     </header>
 
-    <main class="main-content" id="main-content">
+    <main class="main-content" id="main-content" tabindex="-1">
         {% if messages %}
             <div class="message-stack" aria-live="polite">
                 {% for message in messages %}
@@ -61,7 +74,7 @@
             <section class="panel service-error" role="alert">
                 <span class="card-icon" aria-hidden="true">!</span>
                 <div>
-                    <h2>{{ error_title|default:"Assessment temporarily unavailable" }}</h2>
+                    <h1>{{ error_title|default:"Assessment temporarily unavailable" }}</h1>
                     <p>{{ error_message }}</p>
                     {% if error_guidance %}<p>{{ error_guidance }}</p>{% endif %}
                 </div>
@@ -71,7 +84,7 @@
         {% endif %}
 
         <footer class="footer-row">
-            <p>This result supports a staff review. It does not approve or decline an application.</p>
+            <p>{{ footer_message|default:"BankRisk Compass provides decision support for controlled staff workflows." }}</p>
             <span>{{ display_date }}</span>
         </footer>
     </main>

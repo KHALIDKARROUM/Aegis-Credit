@@ -5,9 +5,11 @@ from typing import Any
 
 from django import forms
 from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 
-from .models import AssessmentCase
+from .models import AssessmentCase, CaseOutcome, LegalHoldEvent
 
 
 class ApplicantAssessmentForm(forms.Form):
@@ -183,8 +185,42 @@ class ApplicantAssessmentForm(forms.Form):
                 )
         return warnings
 
+    def distribution_blocks(self) -> list[str]:
+        """Identify material out-of-domain inputs that must not be scored."""
+        if not self.is_valid():
+            return []
+        values = dict(self.cleaned_data)
+        values["loan_percent_income"] = values["loan_amnt"] / values["person_income"]
+        blocks: list[str] = []
+        if values["loan_percent_income"] > 1.0:
+            blocks.append(
+                "The requested loan exceeds annual income and is outside the supported model domain."
+            )
+        bounds = self.bundle["feature_reference"].get("numeric_bounds", {})
+        labels = {
+            "person_income": "Income",
+            "loan_amnt": "Loan amount",
+            "person_emp_length": "Years employed",
+            "cb_person_cred_hist_length": "Credit history length",
+        }
+        for feature, label in labels.items():
+            limit = bounds.get(feature)
+            if not limit:
+                continue
+            minimum = float(limit["minimum"])
+            maximum = float(limit["maximum"])
+            span = max(maximum - minimum, 1.0)
+            value = float(values[feature])
+            if value < minimum - 2 * span or value > maximum + 2 * span:
+                blocks.append(
+                    f"{label} is materially outside the model-development domain and requires manual review without a score."
+                )
+        return blocks
+
 
 class CaseReviewForm(forms.ModelForm):
+    expected_version = forms.IntegerField(widget=forms.HiddenInput())
+
     class Meta:
         model = AssessmentCase
         fields = [
@@ -192,7 +228,6 @@ class CaseReviewForm(forms.ModelForm):
             "reviewer_notes",
             "override_decision",
             "override_reason",
-            "legal_hold",
         ]
         widgets = {
             "reviewer_notes": forms.Textarea(attrs={"rows": 4}),
@@ -201,6 +236,7 @@ class CaseReviewForm(forms.ModelForm):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        self.fields["expected_version"].initial = self.instance.review_version
         for field in self.fields.values():
             field.widget.attrs["class"] = "form-control"
 
@@ -211,6 +247,94 @@ class CaseReviewForm(forms.ModelForm):
                 "override_reason",
                 "Explain why the human reviewer is overriding the model recommendation.",
             )
+        return cleaned
+
+
+class CaseAssignmentForm(forms.Form):
+    assigned_to = forms.ModelChoiceField(
+        label="Assigned reviewer",
+        queryset=get_user_model().objects.none(),
+        required=False,
+        help_text="Leave empty to return the case to the unassigned queue.",
+    )
+    expected_version = forms.IntegerField(widget=forms.HiddenInput())
+
+    def __init__(self, *args: Any, case: AssessmentCase, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        reviewer_groups = Group.objects.filter(name__in=["Reviewers", "Administrators"])
+        self.fields["assigned_to"].queryset = (
+            get_user_model().objects.filter(groups__in=reviewer_groups, is_active=True).distinct()
+        )
+        self.fields["assigned_to"].initial = case.assigned_to
+        self.fields["expected_version"].initial = case.review_version
+        self.fields["assigned_to"].widget.attrs["class"] = "form-control"
+
+
+class LegalHoldForm(forms.Form):
+    action = forms.ChoiceField(choices=LegalHoldEvent.Action.choices)
+    reason = forms.CharField(widget=forms.Textarea(attrs={"rows": 3}), min_length=10)
+    ticket_reference = forms.CharField(
+        max_length=120,
+        help_text="Formal legal, investigation, or preservation ticket.",
+    )
+    expected_version = forms.IntegerField(widget=forms.HiddenInput())
+
+    def __init__(self, *args: Any, case: AssessmentCase, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.fields["expected_version"].initial = case.review_version
+        allowed_action = (
+            LegalHoldEvent.Action.RELEASED if case.legal_hold else LegalHoldEvent.Action.PLACED
+        )
+        self.fields["action"].choices = [
+            (allowed_action, LegalHoldEvent.Action(allowed_action).label)
+        ]
+        for field in self.fields.values():
+            field.widget.attrs["class"] = "form-control"
+
+
+class CaseOutcomeForm(forms.ModelForm):
+    class Meta:
+        model = CaseOutcome
+        fields = [
+            "outcome",
+            "outcome_date",
+            "performance_window_end",
+            "as_of_date",
+            "exposure_at_default",
+            "loss_amount",
+            "source",
+            "source_reference",
+            "notes",
+        ]
+        widgets = {
+            "outcome_date": forms.DateInput(attrs={"type": "date"}),
+            "performance_window_end": forms.DateInput(attrs={"type": "date"}),
+            "as_of_date": forms.DateInput(attrs={"type": "date"}),
+            "notes": forms.Textarea(attrs={"rows": 3}),
+        }
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs["class"] = "form-control"
+
+    def clean(self) -> dict[str, Any]:
+        cleaned = super().clean()
+        outcome_date = cleaned.get("outcome_date")
+        window_end = cleaned.get("performance_window_end")
+        as_of = cleaned.get("as_of_date")
+        outcome = cleaned.get("outcome")
+        if outcome_date and as_of and outcome_date > as_of:
+            self.add_error("outcome_date", "Outcome date cannot be later than the as-of date.")
+        if window_end and as_of and outcome == CaseOutcome.Outcome.PERFORMING and window_end > as_of:
+            self.add_error(
+                "as_of_date",
+                "A performing outcome cannot be recorded before its performance window matures.",
+            )
+        loss = cleaned.get("loss_amount")
+        exposure = cleaned.get("exposure_at_default")
+        if loss is not None and exposure is not None and loss > exposure:
+            self.add_error("loss_amount", "Loss amount cannot exceed exposure at default.")
         return cleaned
 
 
@@ -233,6 +357,12 @@ class BatchUploadForm(forms.Form):
 
 
 class BusinessEconomicsForm(forms.Form):
+    scenario_name = forms.CharField(
+        label="Scenario name",
+        max_length=120,
+        required=False,
+        help_text="Required only when saving this scenario.",
+    )
     average_exposure = forms.DecimalField(
         label="Average approved loan",
         min_value=100,
@@ -262,6 +392,29 @@ class BusinessEconomicsForm(forms.Form):
         max_value=100_000,
         initial=35,
         decimal_places=2,
+    )
+    review_abandonment_rate = forms.DecimalField(
+        label="Performing-applicant abandonment after review",
+        min_value=0,
+        max_value=1,
+        initial=0.02,
+        decimal_places=3,
+        help_text="Estimated share of reviewed performing applicants who abandon the process.",
+    )
+    downstream_default_catch_rate = forms.DecimalField(
+        label="Defaults caught by later underwriting",
+        min_value=0,
+        max_value=1,
+        initial=0.50,
+        decimal_places=3,
+        help_text="Estimated share of model misses caught by the remaining underwriting controls.",
+    )
+    review_capacity = forms.IntegerField(
+        label="Review capacity",
+        min_value=1,
+        max_value=10_000_000,
+        initial=1000,
+        help_text="Maximum applications that the review team can process in this evaluation sample.",
     )
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:

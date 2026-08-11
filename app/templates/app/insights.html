@@ -1,9 +1,20 @@
 {% extends "app/base.html" %}
 
+{% block title %}Model insights · BankRisk Compass{% endblock %}
+
 {% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">Model evidence</span>
+        <h1>Model insights</h1>
+        <p>Compare candidate performance and global feature importance from the saved validation artifacts.</p>
+    </div>
+    <a class="text-button" href="{% url 'reports' %}">Back to reports</a>
+</section>
+
 <section class="dashboard-grid split">
     <article class="panel">
-        <div class="card-title"><span class="title-icon">MC</span>Model Performance Comparison</div>
+        <h2 class="card-title"><span class="title-icon" aria-hidden="true">MC</span>Model Performance Comparison</h2>
         <div class="comparison-chart">
             {% for row in model_comparison_bars %}
                 <div class="comparison-row">
@@ -21,7 +32,7 @@
     </article>
 
     <article class="panel">
-        <div class="card-title"><span class="title-icon">DR</span>Top Credit Risk Drivers</div>
+        <h2 class="card-title"><span class="title-icon" aria-hidden="true">DR</span>Top Credit Risk Drivers</h2>
         <div class="bar-list importance-list">
             {% for row in importance_bars %}
                 <div class="bar-row">
@@ -37,13 +48,14 @@
 </section>
 
 <section class="panel">
-    <div class="card-title"><span class="title-icon">MT</span>Model Metrics Table</div>
+    <h2 class="card-title"><span class="title-icon" aria-hidden="true">MT</span>Model Metrics Table</h2>
     <div class="table-wrap">
         <table class="data-table">
+            <caption class="sr-only">Validation metrics for each candidate model</caption>
             <thead>
                 <tr>
                     {% for column in model_comparison_table.columns %}
-                        <th>{{ column }}</th>
+                        <th scope="col">{{ column }}</th>
                     {% endfor %}
                 </tr>
             </thead>

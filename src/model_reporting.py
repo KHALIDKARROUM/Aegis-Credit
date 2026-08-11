@@ -9,6 +9,23 @@ from sklearn.calibration import calibration_curve
 from sklearn.metrics import confusion_matrix, f1_score, recall_score, roc_auc_score
 
 
+def _wilson_interval(successes: int, total: int, z: float = 1.96) -> tuple[float, float]:
+    if total <= 0:
+        return float("nan"), float("nan")
+    proportion = successes / total
+    denominator = 1 + (z**2 / total)
+    centre = (proportion + z**2 / (2 * total)) / denominator
+    margin = (
+        z
+        * np.sqrt(
+            (proportion * (1 - proportion) / total)
+            + (z**2 / (4 * total**2))
+        )
+        / denominator
+    )
+    return float(max(0.0, centre - margin)), float(min(1.0, centre + margin))
+
+
 def save_calibration_report(
     y_true: pd.Series,
     probabilities: np.ndarray,
@@ -56,8 +73,9 @@ def save_age_fairness_report(
     evaluation["age_group"] = pd.cut(
         evaluation["person_age"],
         bins=[0, 24, 34, 49, 61, np.inf],
-        labels=["20-24", "25-34", "35-49", "50-61", "62+"],
-    )
+        labels=["18-24", "25-34", "35-49", "50-61", "62+"],
+    ).astype("object")
+    evaluation["age_group"] = evaluation["age_group"].fillna("Unknown")
 
     rows = []
     for group, values in evaluation.groupby("age_group", observed=True):
@@ -66,15 +84,23 @@ def save_age_fairness_report(
             values["predicted_default"],
             labels=[0, 1],
         ).ravel()
+        tpr_lower, tpr_upper = _wilson_interval(int(tp), int(tp + fn))
+        fpr_lower, fpr_upper = _wilson_interval(int(fp), int(fp + tn))
         rows.append(
             {
                 "age_group": str(group),
                 "applicants": len(values),
+                "observed_defaults": int(tp + fn),
+                "observed_non_defaults": int(tn + fp),
                 "observed_default_rate": values["actual_default"].mean(),
                 "predicted_high_risk_rate": values["predicted_default"].mean(),
                 "average_predicted_probability": values["probability"].mean(),
-                "true_positive_rate": tp / (tp + fn) if tp + fn else 0.0,
-                "false_positive_rate": fp / (fp + tn) if fp + tn else 0.0,
+                "true_positive_rate": tp / (tp + fn) if tp + fn else float("nan"),
+                "true_positive_rate_lower_95": tpr_lower,
+                "true_positive_rate_upper_95": tpr_upper,
+                "false_positive_rate": fp / (fp + tn) if fp + tn else float("nan"),
+                "false_positive_rate_lower_95": fpr_lower,
+                "false_positive_rate_upper_95": fpr_upper,
             }
         )
 

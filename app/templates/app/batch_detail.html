@@ -10,32 +10,88 @@
         <p>{{ batch.get_status_display }} · {{ batch.valid_rows }} scored · {{ batch.invalid_rows }} invalid</p>
     </div>
     <div class="page-actions">
-        <a class="secondary-button" href="{% url 'batch-results' batch.id %}">Download results</a>
+        {% if batch.status == "complete" %}<a class="secondary-button" href="{% url 'batch-results' batch.id %}">Download results</a>{% elif batch.status == "failed" and batch_can_download %}<a class="secondary-button" href="{% url 'batch-results' batch.id %}">Download partial results</a>{% endif %}
+        {% if batch.status == "pending" or batch.status == "processing" %}{% if batch.cancel_requested %}<span class="status-pill warning">Cancel requested</span>{% else %}<form method="post" action="{% url 'batch-cancel' batch.id %}">{% csrf_token %}<button class="text-button" type="submit">Cancel batch</button></form>{% endif %}{% endif %}
+        {% if batch.status == "failed" %}<form method="post" action="{% url 'batch-retry' batch.id %}">{% csrf_token %}<button class="secondary-button" type="submit">Retry failed batch</button></form>{% endif %}
         <a class="text-button" href="{% url 'batch-upload' %}">Load another file</a>
     </div>
 </section>
 
+{% if batch.status == "pending" %}
+<section class="status-banner neutral" role="status" aria-live="polite">
+    <strong>{% if batch.cancel_requested %}Cancellation is queued.{% else %}Batch is queued.{% endif %}</strong>
+    <span>{% if batch.cancel_requested %}The worker will remove the protected upload when it processes the request.{% else %}Row processing has not started yet.{% endif %}</span>
+</section>
+{% elif batch.status == "processing" %}
+<section class="status-banner neutral" role="status" aria-live="polite">
+    <strong>{% if batch.cancel_requested %}Cancellation requested{% else %}Processing applicant rows{% endif %}</strong>
+    <span>{% if batch.cancel_requested %}The worker will stop before the next row and retain the completed row records.{% elif batch_progress_percent != None %}{{ batch_progress_percent }}% complete{% else %}Refresh this page to check progress.{% endif %}</span>
+</section>
+{% elif batch.status == "failed" %}
+<section class="form-alert error-alert" role="alert">
+    <strong>The batch could not be completed.</strong>
+    <span>{{ batch_error_message|default:batch.error_message|default:"Review the row errors below, correct the source file, and try again." }}</span>
+</section>
+{% elif batch.status == "cancelled" %}
+<section class="status-banner neutral" role="status">
+    <strong>Batch processing was cancelled.</strong>
+    <span>Only rows completed before cancellation appear below.</span>
+</section>
+{% elif batch_warning_count %}
+<section class="form-alert warning-alert" role="status">
+    <strong>{{ batch_warning_count }} scored row{{ batch_warning_count|pluralize }} need input verification.</strong>
+    <span>Review the warnings below before continuing the staff workflow.</span>
+</section>
+{% endif %}
+
+{% if batch.started_at or batch.completed_at or batch.attempts %}
+<dl class="provenance-strip" aria-label="Batch processing details">
+    {% if batch.started_at %}<div><dt>Started</dt><dd>{{ batch.started_at|date:"Y-m-d H:i" }}</dd></div>{% endif %}
+    {% if batch.completed_at %}<div><dt>Completed</dt><dd>{{ batch.completed_at|date:"Y-m-d H:i" }}</dd></div>{% endif %}
+    <div><dt>Attempts</dt><dd>{{ batch.attempts }}</dd></div>
+</dl>
+{% endif %}
+
 <section class="panel data-panel">
     <div class="table-wrap">
         <table class="data-table">
-            <thead><tr><th>Row</th><th>Reference</th><th>Status</th><th>Probability</th><th>Risk</th><th>Recommendation or errors</th><th></th></tr></thead>
+            <caption class="sr-only">Validation and scoring results for {{ batch.file_name }}</caption>
+            <thead><tr><th scope="col">Row</th><th scope="col">Reference</th><th scope="col">Status</th><th scope="col">Probability</th><th scope="col">Risk</th><th scope="col">Recommendation, warnings, or errors</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
             <tbody>
-                {% for row in batch.results %}
+                {% with displayed_rows=batch_rows|default:batch.results %}
+                {% for row in displayed_rows %}
                     <tr>
-                        <td>{{ row.row }}</td>
+                        <th scope="row">{% if row.row %}{{ row.row }}{% elif row.row_number %}{{ row.row_number }}{% else %}—{% endif %}</th>
                         <td>{{ row.applicant_reference|default:"—" }}</td>
-                        <td>{{ row.status }}</td>
-                        <td>{% if row.probability != None %}{{ row.probability|floatformat:3 }}{% else %}—{% endif %}</td>
-                        <td>{{ row.risk_category|default:"—" }}</td>
+                        <td><span class="status-pill {{ row.status }}">{{ row.status|default:"failed"|title }}</span></td>
+                        {% if row.row_number %}
+                            <td>{% if row.result.probability != None %}{{ row.result.probability|floatformat:3 }}{% else %}—{% endif %}</td>
+                            <td>{{ row.result.risk_category|default:"—" }}</td>
+                        {% else %}
+                            <td>{% if row.probability != None %}{{ row.probability|floatformat:3 }}{% else %}—{% endif %}</td>
+                            <td>{{ row.risk_category|default:"—" }}</td>
+                        {% endif %}
                         <td>
-                            {{ row.recommended_next_step }}
-                            {% for error in row.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+                            {% if row.row_number %}{{ row.result.recommended_next_step }}{% else %}{{ row.recommended_next_step }}{% endif %}
+                            {% if row.warnings %}
+                                <div class="row-feedback warning">
+                                    <strong>Verify input</strong>
+                                    <ul>{% for warning in row.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+                                </div>
+                            {% endif %}
+                            {% if row.errors %}
+                                <div class="row-feedback error" role="alert">
+                                    <strong>Row not scored</strong>
+                                    <ul>{% for error in row.errors %}<li>{{ error }}</li>{% endfor %}</ul>
+                                </div>
+                            {% endif %}
                         </td>
-                        <td>{% if row.case_id %}<a class="inline-link" href="{% url 'case-detail' row.case_id %}">Case</a>{% endif %}</td>
+                        <td>{% if row.case %}<a class="inline-link" href="{% url 'case-detail' row.case.id %}">Case</a>{% elif row.case_id %}<a class="inline-link" href="{% url 'case-detail' row.case_id %}">Case</a>{% endif %}</td>
                     </tr>
                 {% empty %}
                     <tr><td colspan="7">No row results are available.</td></tr>
                 {% endfor %}
+                {% endwith %}
             </tbody>
         </table>
     </div>

@@ -1,3 +1,45 @@
+x-application-environment: &application_environment
+  DEBUG: ${DEBUG:-False}
+  SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env or your secret manager}
+  AUDIT_HMAC_KEY: ${AUDIT_HMAC_KEY:?set AUDIT_HMAC_KEY in .env or your secret manager}
+  AUDIT_HMAC_KEYS: ${AUDIT_HMAC_KEYS:-}
+  FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:?set FIELD_ENCRYPTION_KEY in .env or your secret manager}
+  FIELD_ENCRYPTION_KEYS: ${FIELD_ENCRYPTION_KEYS:-}
+  BACKUP_ENCRYPTION_KEY: ${BACKUP_ENCRYPTION_KEY:?set BACKUP_ENCRYPTION_KEY in .env or your secret manager}
+  MODEL_SIGNING_PUBLIC_KEY: ${MODEL_SIGNING_PUBLIC_KEY:?set MODEL_SIGNING_PUBLIC_KEY in .env or your secret manager}
+  DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env or your secret manager}
+  DB_SSL_REQUIRE: ${DB_SSL_REQUIRE:-False}
+  ALLOWED_HOSTS: ${ALLOWED_HOSTS:-127.0.0.1,localhost}
+  LOGIN_REQUIRED: ${LOGIN_REQUIRED:-True}
+  LOCAL_DEMO_MODE: ${LOCAL_DEMO_MODE:-False}
+  DATA_PROVENANCE_VERIFIED: ${DATA_PROVENANCE_VERIFIED:-False}
+  SECURE_SSL_REDIRECT: ${SECURE_SSL_REDIRECT:-False}
+  TRUST_X_FORWARDED_PROTO: ${TRUST_X_FORWARDED_PROTO:-False}
+  SCORING_API_KEY: ${SCORING_API_KEY:-}
+  SCORING_API_KEYS: ${SCORING_API_KEYS:-{}}
+  API_RATE_LIMIT_PER_MINUTE: ${API_RATE_LIMIT_PER_MINUTE:-60}
+  CASE_RETENTION_DAYS: ${CASE_RETENTION_DAYS:-365}
+  ACCESS_LOG_RETENTION_DAYS: ${ACCESS_LOG_RETENTION_DAYS:-365}
+  RETENTION_INTERVAL_SECONDS: ${RETENTION_INTERVAL_SECONDS:-86400}
+  MAX_BATCH_ROWS: ${MAX_BATCH_ROWS:-1000}
+  MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-10485760}
+  MAX_XLSX_UNCOMPRESSED_BYTES: ${MAX_XLSX_UNCOMPRESSED_BYTES:-52428800}
+  MAX_XLSX_ARCHIVE_MEMBERS: ${MAX_XLSX_ARCHIVE_MEMBERS:-2000}
+  CASE_REVIEW_SLA_HOURS: ${CASE_REVIEW_SLA_HOURS:-48}
+  CASE_PAGE_SIZE: ${CASE_PAGE_SIZE:-50}
+  MONITORING_FRESHNESS_HOURS: ${MONITORING_FRESHNESS_HOURS:-24}
+  MONITORING_MIN_SAMPLE_SIZE: ${MONITORING_MIN_SAMPLE_SIZE:-100}
+  CURRENCY_CODE: ${CURRENCY_CODE:-}
+  BATCH_PROCESS_INLINE: ${BATCH_PROCESS_INLINE:-False}
+  BATCH_LEASE_SECONDS: ${BATCH_LEASE_SECONDS:-300}
+  BATCH_MAX_ATTEMPTS: ${BATCH_MAX_ATTEMPTS:-3}
+  MEDIA_ROOT: ${MEDIA_ROOT:-/app/media}
+  MEDIA_URL: ${MEDIA_URL:-/media/}
+  MEDIA_STORAGE_BACKEND: ${MEDIA_STORAGE_BACKEND:-django.core.files.storage.FileSystemStorage}
+  BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-}
+  BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+  BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+
 services:
   database:
     image: postgres:18-alpine
@@ -9,50 +51,78 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env or your secret manager}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env or your secret manager}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U bankrisk -d bankrisk"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 5s
       retries: 12
+    restart: unless-stopped
     volumes:
       - bankrisk_postgres:/var/lib/postgresql/data
 
-  web:
+  migrate:
     build: .
-    env_file:
-      - path: .env
-        required: false
-    ports:
-      - "127.0.0.1:8000:8000"
-    environment: &application_environment
-      DEBUG: ${DEBUG:-False}
-      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env or your secret manager}
-      AUDIT_HMAC_KEY: ${AUDIT_HMAC_KEY:?set AUDIT_HMAC_KEY in .env or your secret manager}
-      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:?set FIELD_ENCRYPTION_KEY in .env or your secret manager}
-      BACKUP_ENCRYPTION_KEY: ${BACKUP_ENCRYPTION_KEY:?set BACKUP_ENCRYPTION_KEY in .env or your secret manager}
-      MODEL_SIGNING_PUBLIC_KEY: ${MODEL_SIGNING_PUBLIC_KEY:?set MODEL_SIGNING_PUBLIC_KEY in .env or your secret manager}
-      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env or your secret manager}
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-127.0.0.1,localhost}
-      LOGIN_REQUIRED: ${LOGIN_REQUIRED:-True}
-      DATA_PROVENANCE_VERIFIED: ${DATA_PROVENANCE_VERIFIED:-False}
-      CASE_RETENTION_DAYS: ${CASE_RETENTION_DAYS:-365}
-      ACCESS_LOG_RETENTION_DAYS: ${ACCESS_LOG_RETENTION_DAYS:-365}
-      RETENTION_INTERVAL_SECONDS: ${RETENTION_INTERVAL_SECONDS:-86400}
-    depends_on:
-      database:
-        condition: service_healthy
-
-  retention:
-    build: .
-    env_file:
-      - path: .env
-        required: false
     command: >
-      sh -c 'while true; do python manage.py purge_old_cases --confirm;
-      sleep "$${RETENTION_INTERVAL_SECONDS:-86400}"; done'
+      sh -c 'python manage.py migrate --no-input && python manage.py bootstrap_roles'
     environment: *application_environment
     depends_on:
       database:
         condition: service_healthy
+    restart: "no"
+
+  web:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment: *application_environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz/', timeout=3).read()"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    stop_grace_period: 30s
+    volumes:
+      - bankrisk_media:/app/media
+
+  batch-worker:
+    build: .
+    command: python manage.py process_batches --poll-seconds 2
+    environment: *application_environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    stop_grace_period: 30s
+    volumes:
+      - bankrisk_media:/app/media
+
+  retention:
+    build: .
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        while true; do
+          python manage.py purge_old_cases --confirm
+          sleep "$${RETENTION_INTERVAL_SECONDS:-86400}"
+        done
+    environment: *application_environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "on-failure:5"
+    volumes:
+      - bankrisk_media:/app/media
 
 volumes:
   bankrisk_postgres:
+  bankrisk_media:

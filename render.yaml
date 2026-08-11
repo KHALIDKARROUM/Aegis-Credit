@@ -10,10 +10,12 @@ services:
   - type: web
     name: bankrisk-compass
     runtime: python
-    plan: free
+    plan: starter
+    region: frankfurt
     buildCommand: bash build.sh
+    preDeployCommand: python manage.py migrate --no-input && python manage.py bootstrap_roles
     startCommand: gunicorn bankrisk_compass.wsgi:application --workers 2 --threads 2 --timeout 120
-    healthCheckPath: /healthz/
+    healthCheckPath: /readyz/
     envVars:
       - key: PYTHON_VERSION
         value: 3.13.9
@@ -21,25 +23,227 @@ services:
         value: "False"
       - key: LOGIN_REQUIRED
         value: "True"
+      - key: LOCAL_DEMO_MODE
+        value: "False"
+      - key: DATA_PROVENANCE_VERIFIED
+        value: "False"
       - key: SECRET_KEY
         generateValue: true
       - key: AUDIT_HMAC_KEY
         generateValue: true
+      - key: AUDIT_HMAC_KEYS
+        sync: false
+      - key: FIELD_ENCRYPTION_KEY
+        sync: false
+      - key: FIELD_ENCRYPTION_KEYS
+        sync: false
+      - key: BACKUP_ENCRYPTION_KEY
+        sync: false
+      - key: MODEL_SIGNING_PUBLIC_KEY
+        sync: false
       - key: DATABASE_URL
         fromDatabase:
           name: bankrisk-compass-db
           property: connectionString
+      - key: DB_SSL_REQUIRE
+        value: "True"
       - key: SECURE_SSL_REDIRECT
+        value: "True"
+      - key: TRUST_X_FORWARDED_PROTO
         value: "True"
       - key: SECURE_HSTS_INCLUDE_SUBDOMAINS
         value: "True"
       - key: SECURE_HSTS_PRELOAD
         value: "True"
       - key: SCORING_API_KEY
-        generateValue: true
+        sync: false
+      - key: SCORING_API_KEYS
+        sync: false
+      - key: CASE_RETENTION_DAYS
+        value: "365"
+      - key: ACCESS_LOG_RETENTION_DAYS
+        value: "365"
+      - key: MAX_BATCH_ROWS
+        value: "1000"
+      - key: MAX_UPLOAD_BYTES
+        value: "10485760"
+      - key: MAX_XLSX_UNCOMPRESSED_BYTES
+        value: "52428800"
+      - key: MAX_XLSX_ARCHIVE_MEMBERS
+        value: "2000"
+      - key: CASE_REVIEW_SLA_HOURS
+        value: "48"
+      - key: CASE_PAGE_SIZE
+        value: "50"
+      - key: MONITORING_FRESHNESS_HOURS
+        value: "24"
+      - key: MONITORING_MIN_SAMPLE_SIZE
+        value: "100"
+      - key: CURRENCY_CODE
+        sync: false
+      - key: BATCH_PROCESS_INLINE
+        value: "False"
+      - key: BATCH_LEASE_SECONDS
+        value: "300"
+      - key: BATCH_MAX_ATTEMPTS
+        value: "3"
       - key: BOOTSTRAP_ADMIN_USERNAME
         sync: false
       - key: BOOTSTRAP_ADMIN_PASSWORD
         sync: false
       - key: BOOTSTRAP_ADMIN_EMAIL
         sync: false
+
+  - type: worker
+    name: bankrisk-compass-batch-worker
+    runtime: python
+    plan: starter
+    region: frankfurt
+    buildCommand: bash build.sh
+    startCommand: >-
+      sh -c 'until python manage.py migrate --check; do sleep 5; done;
+      exec python manage.py process_batches --poll-seconds 2'
+    maxShutdownDelaySeconds: 300
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.9
+      - key: DEBUG
+        value: "False"
+      - key: LOGIN_REQUIRED
+        value: "True"
+      - key: LOCAL_DEMO_MODE
+        value: "False"
+      - key: DATA_PROVENANCE_VERIFIED
+        value: "False"
+      - key: SECURE_SSL_REDIRECT
+        value: "True"
+      - key: SECRET_KEY
+        fromService:
+          type: web
+          name: bankrisk-compass
+          envVarKey: SECRET_KEY
+      - key: AUDIT_HMAC_KEY
+        fromService:
+          type: web
+          name: bankrisk-compass
+          envVarKey: AUDIT_HMAC_KEY
+      - key: AUDIT_HMAC_KEYS
+        fromService:
+          type: web
+          name: bankrisk-compass
+          envVarKey: AUDIT_HMAC_KEYS
+      - key: FIELD_ENCRYPTION_KEY
+        fromService:
+          type: web
+          name: bankrisk-compass
+          envVarKey: FIELD_ENCRYPTION_KEY
+      - key: FIELD_ENCRYPTION_KEYS
+        fromService:
+          type: web
+          name: bankrisk-compass
+          envVarKey: FIELD_ENCRYPTION_KEYS
+      - key: BACKUP_ENCRYPTION_KEY
+        fromService:
+          type: web
+          name: bankrisk-compass
+          envVarKey: BACKUP_ENCRYPTION_KEY
+      - key: MODEL_SIGNING_PUBLIC_KEY
+        fromService:
+          type: web
+          name: bankrisk-compass
+          envVarKey: MODEL_SIGNING_PUBLIC_KEY
+      - key: DATABASE_URL
+        fromDatabase:
+          name: bankrisk-compass-db
+          property: connectionString
+      - key: DB_SSL_REQUIRE
+        value: "True"
+      - key: MAX_BATCH_ROWS
+        value: "1000"
+      - key: MAX_UPLOAD_BYTES
+        value: "10485760"
+      - key: MAX_XLSX_UNCOMPRESSED_BYTES
+        value: "52428800"
+      - key: MAX_XLSX_ARCHIVE_MEMBERS
+        value: "2000"
+      - key: CASE_REVIEW_SLA_HOURS
+        value: "48"
+      - key: BATCH_PROCESS_INLINE
+        value: "False"
+      - key: BATCH_LEASE_SECONDS
+        value: "300"
+      - key: BATCH_MAX_ATTEMPTS
+        value: "3"
+
+  - type: cron
+    name: bankrisk-compass-retention
+    runtime: python
+    plan: starter
+    region: frankfurt
+    schedule: "17 3 * * *"
+    buildCommand: bash build.sh
+    startCommand: python manage.py purge_old_cases --confirm
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.9
+      - key: DEBUG
+        value: "False"
+      - key: LOGIN_REQUIRED
+        value: "True"
+      - key: LOCAL_DEMO_MODE
+        value: "False"
+      - key: DATA_PROVENANCE_VERIFIED
+        value: "False"
+      - key: SECURE_SSL_REDIRECT
+        value: "True"
+      - key: SECRET_KEY
+        fromService:
+          type: web
+          name: bankrisk-compass
+          envVarKey: SECRET_KEY
+      - key: AUDIT_HMAC_KEY
+        fromService:
+          type: web
+          name: bankrisk-compass
+          envVarKey: AUDIT_HMAC_KEY
+      - key: AUDIT_HMAC_KEYS
+        fromService:
+          type: web
+          name: bankrisk-compass
+          envVarKey: AUDIT_HMAC_KEYS
+      - key: FIELD_ENCRYPTION_KEY
+        fromService:
+          type: web
+          name: bankrisk-compass
+          envVarKey: FIELD_ENCRYPTION_KEY
+      - key: FIELD_ENCRYPTION_KEYS
+        fromService:
+          type: web
+          name: bankrisk-compass
+          envVarKey: FIELD_ENCRYPTION_KEYS
+      - key: BACKUP_ENCRYPTION_KEY
+        fromService:
+          type: web
+          name: bankrisk-compass
+          envVarKey: BACKUP_ENCRYPTION_KEY
+      - key: MODEL_SIGNING_PUBLIC_KEY
+        fromService:
+          type: web
+          name: bankrisk-compass
+          envVarKey: MODEL_SIGNING_PUBLIC_KEY
+      - key: DATABASE_URL
+        fromDatabase:
+          name: bankrisk-compass-db
+          property: connectionString
+      - key: DB_SSL_REQUIRE
+        value: "True"
+      - key: CASE_RETENTION_DAYS
+        fromService:
+          type: web
+          name: bankrisk-compass
+          envVarKey: CASE_RETENTION_DAYS
+      - key: ACCESS_LOG_RETENTION_DAYS
+        fromService:
+          type: web
+          name: bankrisk-compass
+          envVarKey: ACCESS_LOG_RETENTION_DAYS

@@ -17,6 +17,13 @@ Before redistribution or operational use, record:
 - missing-value, exclusion, and sampling rules;
 - de-identification and privacy assessment;
 - comparison of the source file with the included SHA-256 hash.
+- units, currency, source system, observation time, and permissible use for
+  every input field;
+- application/approval policy that created the observed population, including
+  rejected-applicant and survivorship bias;
+- target event, observation horizon, maturity/censoring rules, and label owner;
+- an approved decision on whether repository history containing the file and
+  derived artifacts must be rewritten or access-restricted.
 
 Current project data SHA-256:
 
@@ -29,3 +36,9 @@ excluded from the project MIT license. It must not be loaded for scoring,
 training, validation, reporting, or any other operational purpose. The
 application enforces this with `DATA_PROVENANCE_VERIFIED=False` by default;
 approval must be documented before that deployment setting can be changed.
+
+`DATA_PROVENANCE_VERIFIED=True` is an attestation, not a workaround. A signed
+release must repeat the attestation and bind the exact dataset digest. If the
+evidence cannot be obtained, remove the CSV, model pickle, notebook outputs,
+and derived reports from distributable builds and assess whether they must also
+be removed from Git history.

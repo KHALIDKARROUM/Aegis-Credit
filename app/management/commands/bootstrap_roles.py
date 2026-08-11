@@ -13,7 +13,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         groups = {
             name: Group.objects.get_or_create(name=name)[0]
-            for name in ("Analysts", "Reviewers", "Administrators")
+            for name in ("Analysts", "Reviewers", "Legal Officers", "Administrators")
         }
         self.stdout.write(self.style.SUCCESS("Roles are ready."))
 

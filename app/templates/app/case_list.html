@@ -9,10 +9,10 @@
         <h1>Assessment cases</h1>
         <p>Search saved screenings, track review status, and record human decisions.</p>
     </div>
-    <a class="primary-link" href="{% url 'overview' %}">New assessment</a>
+    <a class="primary-link" href="{% url 'assessment' %}">New assessment</a>
 </section>
 
-<form class="panel filter-form" method="get">
+<form class="panel filter-form" method="get" aria-label="Filter assessment cases">
     <label>Search
         <input name="q" value="{{ query }}" placeholder="Reference or case ID">
     </label>
@@ -32,39 +32,110 @@
             {% endfor %}
         </select>
     </label>
+    {% if assignee_choices %}
+        <label>Assigned to
+            <select name="assignee">
+                <option value="">All assignees</option>
+                {% for value, label in assignee_choices %}
+                    <option value="{{ value }}" {% if selected_assignee == value|stringformat:'s' %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+    {% endif %}
+    {% if sla_choices %}
+        <label>Review timing
+            <select name="sla">
+                <option value="">All review timings</option>
+                {% for value, label in sla_choices %}
+                    <option value="{{ value }}" {% if selected_sla == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+    {% endif %}
+    {% if selected_sort %}
+        <label>Sort cases
+            <select name="sort">
+                <option value="newest" {% if selected_sort == "newest" %}selected{% endif %}>Newest first</option>
+                <option value="oldest" {% if selected_sort == "oldest" %}selected{% endif %}>Oldest first</option>
+                <option value="highest_risk" {% if selected_sort == "highest_risk" %}selected{% endif %}>Highest risk first</option>
+                <option value="due_first" {% if selected_sort == "due_first" %}selected{% endif %}>Review due first</option>
+            </select>
+        </label>
+    {% endif %}
     <button class="secondary-button" type="submit">Apply filters</button>
+    {% if query or selected_status or selected_risk or selected_assignee or selected_sla or selected_sort != "newest" %}
+        <a class="text-button filter-clear" href="{% url 'case-list' %}">Clear filters</a>
+    {% endif %}
 </form>
 
 <section class="panel data-panel">
+    <div class="table-heading">
+        <h2>Case queue</h2>
+        {% if page_obj %}
+            <p>Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ page_obj.paginator.count }} cases</p>
+        {% else %}
+            <p>{{ cases|length }} cases shown</p>
+        {% endif %}
+    </div>
     <div class="table-wrap">
         <table class="data-table">
+            <caption class="sr-only">Assessment cases matching the current filters</caption>
             <thead>
                 <tr>
-                    <th>Created</th>
-                    <th>Reference</th>
-                    <th>Risk</th>
-                    <th>Probability</th>
-                    <th>Recommendation</th>
-                    <th>Status</th>
-                    <th></th>
+                    <th scope="col">Created</th>
+                    <th scope="col">Reference</th>
+                    <th scope="col">Risk</th>
+                    <th scope="col">Probability</th>
+                    <th scope="col">Model guidance</th>
+                    <th scope="col">Human decision</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Assigned to</th>
+                    {% if case_sla_enabled %}<th scope="col">Review timing</th>{% endif %}
+                    <th scope="col"><span class="sr-only">Actions</span></th>
                 </tr>
             </thead>
             <tbody>
-                {% for case in cases %}
+                {% with displayed_cases=page_obj|default:cases %}
+                {% for case in displayed_cases %}
                     <tr>
                         <td>{{ case.created_at|date:"Y-m-d H:i" }}</td>
-                        <td>{{ case.applicant_reference|default:case.id }}</td>
+                        <th scope="row">{{ case.applicant_reference|default:case.id }}</th>
                         <td><span class="risk-pill {{ case.risk_category|lower }}">{{ case.risk_category }}</span></td>
                         <td>{{ case.probability_percent }}</td>
+                        <td>{{ case.recommendation }}</td>
                         <td>{{ case.effective_recommendation }}</td>
                         <td>{{ case.get_status_display }}</td>
+                        <td>{{ case.assigned_to.get_username|default:"Unassigned" }}</td>
+                        {% if case_sla_enabled %}
+                            <td>
+                                {% if case.sla_label %}
+                                    <span class="status-pill {{ case.sla_tone|default:'neutral' }}">{{ case.sla_label }}</span>
+                                    {% if case.due_at %}<small class="table-subtext">Due {{ case.due_at|date:"Y-m-d H:i" }}</small>{% endif %}
+                                {% else %}
+                                    <span class="muted-text">Not configured</span>
+                                {% endif %}
+                            </td>
+                        {% endif %}
                         <td><a class="inline-link" href="{% url 'case-detail' case.id %}">Open</a></td>
                     </tr>
                 {% empty %}
-                    <tr><td colspan="7">No cases match these filters.</td></tr>
+                    <tr><td colspan="{% if case_sla_enabled %}10{% else %}9{% endif %}">No cases match these filters. <a class="inline-link" href="{% url 'case-list' %}">Clear filters</a></td></tr>
                 {% endfor %}
+                {% endwith %}
             </tbody>
         </table>
     </div>
+
+    {% if page_obj.has_other_pages %}
+        <nav class="pagination" aria-label="Case list pages">
+            {% if page_obj.has_previous %}
+                <a class="secondary-button" href="?q={{ query|urlencode }}&amp;status={{ selected_status|urlencode }}&amp;risk={{ selected_risk|urlencode }}&amp;assignee={{ selected_assignee|urlencode }}&amp;sla={{ selected_sla|urlencode }}&amp;sort={{ selected_sort|urlencode }}&amp;page={{ page_obj.previous_page_number }}" rel="prev">Previous</a>
+            {% endif %}
+            <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+            {% if page_obj.has_next %}
+                <a class="secondary-button" href="?q={{ query|urlencode }}&amp;status={{ selected_status|urlencode }}&amp;risk={{ selected_risk|urlencode }}&amp;assignee={{ selected_assignee|urlencode }}&amp;sla={{ selected_sla|urlencode }}&amp;sort={{ selected_sort|urlencode }}&amp;page={{ page_obj.next_page_number }}" rel="next">Next</a>
+            {% endif %}
+        </nav>
+    {% endif %}
 </section>
 {% endblock %}

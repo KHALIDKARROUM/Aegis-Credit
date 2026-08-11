@@ -1,0 +1,18 @@
+{% extends "app/base.html" %}
+
+{% block title %}Page not found · BankRisk Compass{% endblock %}
+
+{% block content %}
+<section class="error-shell" aria-labelledby="error-title">
+    <article class="panel error-card">
+        <span class="error-code" aria-hidden="true">404</span>
+        <span class="eyebrow">Page not found</span>
+        <h1 id="error-title">We could not find that page</h1>
+        <p>The link may be outdated, or the record may no longer be available under the retention policy.</p>
+        <div class="page-actions">
+            {% if product_nav_items %}<a class="primary-link" href="{% url product_nav_items.0.url_name %}">Return to {{ product_nav_items.0.label|lower }}</a>{% endif %}
+            {% if product_role == "analyst" or product_role == "reviewer" or product_role == "legal" or product_role == "admin" or product_role == "local" %}<a class="text-button" href="{% url 'case-list' %}">Open case list</a>{% endif %}
+        </div>
+    </article>
+</section>
+{% endblock %}

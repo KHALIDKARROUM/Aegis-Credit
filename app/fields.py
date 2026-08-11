@@ -10,13 +10,15 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from django.conf import settings
 from django.db import models
 
 
-def _cipher() -> Fernet:
-    return Fernet(settings.FIELD_ENCRYPTION_KEY.encode("ascii"))
+def _cipher() -> MultiFernet:
+    configured = getattr(settings, "FIELD_ENCRYPTION_KEYS", None)
+    keys = configured or [settings.FIELD_ENCRYPTION_KEY]
+    return MultiFernet([Fernet(key.encode("ascii")) for key in keys])
 
 
 class EncryptedJSONField(models.TextField):
@@ -39,12 +41,7 @@ class EncryptedJSONField(models.TextField):
         try:
             plaintext = _cipher().decrypt(str(value).encode("ascii"))
         except (InvalidToken, UnicodeEncodeError) as exc:
-            # This path exists only while migration 0005 converts records from
-            # the former JSONField. New plaintext writes are impossible.
-            try:
-                return json.loads(str(value))
-            except json.JSONDecodeError:
-                raise ValueError("Encrypted database value cannot be authenticated or decrypted.") from exc
+            raise ValueError("Encrypted database value cannot be authenticated or decrypted.") from exc
         return json.loads(plaintext.decode("utf-8"))
 
     def to_python(self, value: Any) -> Any:
@@ -68,11 +65,39 @@ class EncryptedTextField(models.TextField):
             return ""
         try:
             return _cipher().decrypt(str(value).encode("ascii")).decode("utf-8")
-        except (InvalidToken, UnicodeEncodeError):
-            # Legacy reviewer notes are converted by migration 0005.
-            return str(value)
+        except (InvalidToken, UnicodeEncodeError) as exc:
+            raise ValueError("Encrypted database value cannot be authenticated or decrypted.") from exc
 
     def to_python(self, value: Any) -> str:
         if value is None:
             return ""
-        return self.from_db_value(value, None, None)
+        # Database values are authenticated and decrypted by ``from_db_value``.
+        # ``to_python`` is also called by model validation for values that are
+        # already plaintext (for example a bound ModelForm), so decrypting here
+        # would reject every legitimate form update as an invalid Fernet token.
+        return str(value)
+
+
+class EncryptedBinaryField(models.BinaryField):
+    """Store bounded uploaded bytes as authenticated ciphertext."""
+
+    description = "Encrypted binary"
+
+    def get_prep_value(self, value: Any) -> bytes | None:
+        if value is None:
+            return None
+        raw = bytes(value)
+        return _cipher().encrypt(raw)
+
+    def from_db_value(self, value: Any, expression: Any, connection: Any) -> bytes:
+        if value is None:
+            return b""
+        try:
+            return _cipher().decrypt(bytes(value))
+        except (InvalidToken, TypeError, ValueError) as exc:
+            raise ValueError("Encrypted binary value cannot be authenticated or decrypted.") from exc
+
+    def to_python(self, value: Any) -> bytes:
+        if value is None:
+            return b""
+        return bytes(value)

@@ -19,8 +19,8 @@
 </section>
 
 <div class="page-actions">
-    <a class="secondary-button" href="{% url 'overview' %}?demo=1">Load demo example</a>
-    <a class="text-button" href="{% url 'overview' %}">Clear form</a>
+    {% if local_demo_mode %}<a class="secondary-button" href="{% url 'assessment' %}?demo=1">Load demo example</a>{% endif %}
+    <a class="text-button" href="{% url 'assessment' %}">Clear form</a>
 </div>
 
 <section class="assessment-grid">
@@ -29,7 +29,7 @@
             <span class="card-icon" aria-hidden="true">1</span>
             <div>
                 <h2>Applicant details</h2>
-                <p>Complete every field using the information supplied in the application.</p>
+                <p>Complete the required fields using the information supplied in the application.</p>
             </div>
         </div>
 
@@ -51,18 +51,20 @@
                             <label for="{{ field.id_for_label }}">{{ field.label }}</label>
                             {{ field }}
                             {% if field.name == "applicant_reference" %}
-                                <span class="field-hint">Use a case number, not an applicant name or government identifier.</span>
+                                <span class="field-hint" id="{{ field.id_for_label }}_hint">Optional. Use a case number, not an applicant name or government identifier.</span>
+                            {% elif field.name == "person_age" %}
+                                <span class="field-hint" id="{{ field.id_for_label }}_hint">Used for plausibility checks only. Age is excluded from the model score and is not retained in the case record.</span>
                             {% elif field.name == "person_income" %}
-                                <span class="field-hint">Gross yearly income in USD.</span>
+                                <span class="field-hint" id="{{ field.id_for_label }}_hint">Gross yearly income in USD.</span>
                             {% elif field.name == "loan_amnt" %}
-                                <span class="field-hint">Total amount requested in USD.</span>
+                                <span class="field-hint" id="{{ field.id_for_label }}_hint">Total amount requested in USD.</span>
                             {% elif field.name == "person_emp_length" %}
-                                <span class="field-hint">Use 0 if the applicant has less than one year.</span>
+                                <span class="field-hint" id="{{ field.id_for_label }}_hint">Use 0 if the applicant has less than one year.</span>
                             {% elif field.name == "cb_person_cred_hist_length" %}
-                                <span class="field-hint">Number of years since the first credit account.</span>
+                                <span class="field-hint" id="{{ field.id_for_label }}_hint">Number of years since the first credit account.</span>
                             {% endif %}
                             {% for error in field.errors %}
-                                <span class="field-error" role="alert">{{ error }}</span>
+                                <span class="field-error" id="{{ field.id_for_label }}_error_{{ forloop.counter }}" role="alert">{{ error }}</span>
                             {% endfor %}
                         </div>
                     {% endif %}
@@ -77,11 +79,11 @@
         </form>
     </article>
 
-    <article class="panel result-panel" aria-live="polite">
+    <article class="panel result-panel" aria-live="polite" aria-labelledby="assessment-result-title">
         <div class="card-heading">
             <span class="card-icon" aria-hidden="true">2</span>
             <div>
-                <h2>Assessment result</h2>
+                <h2 id="assessment-result-title">Assessment result</h2>
                 <p>Your recommendation will appear here.</p>
             </div>
         </div>
@@ -176,8 +178,9 @@
 </section>
 
 <details class="panel application-details">
-    <summary>View the application details used</summary>
+    <summary>View submitted details and scored inputs</summary>
     <div class="detail-content">
+        <p class="section-copy">Age is shown for verification but was not passed to the scoring model or retained in the saved case.</p>
         <div class="snapshot-grid">
             {% for row in snapshot %}
                 <div>

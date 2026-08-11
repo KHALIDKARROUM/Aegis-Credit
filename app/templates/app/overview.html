@@ -1,6 +1,17 @@
 {% extends "app/base.html" %}
 
+{% block title %}Portfolio model overview · BankRisk Compass{% endblock %}
+
 {% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">Portfolio evidence</span>
+        <h1>Portfolio model overview</h1>
+        <p>Review the saved dataset, model, and policy evidence before using applicant-level guidance.</p>
+    </div>
+    <a class="primary-link" href="{% url 'assessment' %}">New assessment</a>
+</section>
+
 <section class="metric-grid">
     {% for metric in metric_tiles %}
         <article class="metric-tile">
@@ -13,7 +24,7 @@
 
 <section class="dashboard-grid three-col">
     <article class="panel">
-        <div class="card-title"><span class="title-icon">DG</span>Default Rate by Grade</div>
+        <h2 class="card-title"><span class="title-icon" aria-hidden="true">DG</span>Default Rate by Grade</h2>
         <div class="bar-list">
             {% for row in grade_bars %}
                 <div class="bar-row">
@@ -26,7 +37,7 @@
     </article>
 
     <article class="panel">
-        <div class="card-title"><span class="title-icon">DI</span>Default Rate by Intent</div>
+        <h2 class="card-title"><span class="title-icon" aria-hidden="true">DI</span>Default Rate by Intent</h2>
         <div class="bar-list">
             {% for row in intent_bars %}
                 <div class="bar-row">
@@ -39,20 +50,22 @@
     </article>
 
     <article class="panel">
-        <div class="card-title"><span class="title-icon">MP</span>Model Performance</div>
+        <h2 class="card-title"><span class="title-icon" aria-hidden="true">MP</span>Model Performance</h2>
         <table class="perf-table">
+            <caption class="sr-only">Performance at the default classification threshold</caption>
             <thead><tr><th colspan="2">Default threshold (0.50)</th></tr></thead>
             <tbody>
                 {% for row in default_metrics_pairs %}
-                    <tr><td>{{ row.label }}</td><td>{{ row.value }}</td></tr>
+                    <tr><th scope="row">{{ row.label }}</th><td>{{ row.value }}</td></tr>
                 {% endfor %}
             </tbody>
         </table>
         <table class="perf-table business">
+            <caption class="sr-only">Performance at the recommended business threshold</caption>
             <thead><tr><th colspan="2">Business threshold ({{ business_threshold }})</th></tr></thead>
             <tbody>
                 {% for row in business_metrics_pairs %}
-                    <tr><td>{{ row.label }}</td><td>{{ row.value }}</td></tr>
+                    <tr><th scope="row">{{ row.label }}</th><td>{{ row.value }}</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -61,7 +74,7 @@
 
 <section class="dashboard-grid split-wide">
     <article class="panel">
-        <div class="card-title"><span class="title-icon">MC</span>Model Performance Comparison</div>
+        <h2 class="card-title"><span class="title-icon" aria-hidden="true">MC</span>Model Performance Comparison</h2>
         <div class="comparison-chart">
             {% for row in model_comparison_bars %}
                 <div class="comparison-row">

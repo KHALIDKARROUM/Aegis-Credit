@@ -7,7 +7,7 @@
     <div>
         <span class="eyebrow">Bulk workflow</span>
         <h1>Load applicant files</h1>
-        <p>Validate and score up to the configured row limit from CSV or Excel.</p>
+        <p>Validate and {% if batch_processing_inline %}score{% else %}queue{% endif %} up to the configured row limit from CSV or Excel.</p>
     </div>
     <a class="secondary-button" href="{% url 'batch-template' %}">Download template</a>
 </section>
@@ -21,13 +21,13 @@
                 <div class="field-group">
                     <label for="{{ field.id_for_label }}">{{ field.label }}</label>
                     {{ field }}
-                    <span class="field-hint">{{ field.help_text }}</span>
-                    {% for error in field.errors %}<span class="field-error">{{ error }}</span>{% endfor %}
+                    {% if field.help_text %}<span class="field-hint" id="{{ field.id_for_label }}_helptext">{{ field.help_text }}</span>{% endif %}
+                    {% for error in field.errors %}<span class="field-error" id="{{ field.id_for_label }}_error_{{ forloop.counter }}" role="alert">{{ error }}</span>{% endfor %}
                 </div>
             {% endfor %}
-            <button class="primary-button" type="submit">
-                <span class="button-label">Validate and score</span>
-                <span class="button-loading">Processing…</span>
+            <button class="primary-button" type="submit" data-loading-label="Validating applicant file">
+                <span class="button-label">Validate and {% if batch_processing_inline %}score{% else %}queue{% endif %}</span>
+                <span class="button-loading" aria-hidden="true">Validating…</span>
             </button>
         </form>
     </article>
@@ -49,7 +49,8 @@ cb_person_default_on_file</code>
     <div class="card-heading"><div><h2>Recent batches</h2></div></div>
     <div class="table-wrap">
         <table class="data-table">
-            <thead><tr><th>Created</th><th>File</th><th>Status</th><th>Rows</th><th>Valid</th><th>Invalid</th><th></th></tr></thead>
+            <caption class="sr-only">Recently processed applicant batches</caption>
+            <thead><tr><th scope="col">Created</th><th scope="col">File</th><th scope="col">Status</th><th scope="col">Rows</th><th scope="col">Valid</th><th scope="col">Invalid</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
             <tbody>
                 {% for batch in recent_batches %}
                     <tr>

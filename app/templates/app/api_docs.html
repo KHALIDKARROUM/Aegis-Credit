@@ -7,34 +7,45 @@
     <div>
         <span class="eyebrow">Integration</span>
         <h1>Scoring API</h1>
-        <p>Authenticated, rate-limited, idempotent screening for one application at a time.</p>
+        <p>Human-readable reference for authenticated, rate-limited, idempotent screening.</p>
     </div>
-    <a class="secondary-button" href="{% url 'openapi-json' %}">OpenAPI JSON</a>
+    <a class="secondary-button" href="{% url 'openapi-json' %}">Download OpenAPI JSON</a>
+</section>
+
+<section class="status-banner {% if api_enabled %}success{% else %}neutral{% endif %}" role="status">
+    <strong>API is {% if api_enabled %}configured{% else %}disabled{% endif %}.</strong>
+    <span>{% if api_enabled %}Protect the configured key and test against a non-production application first.{% else %}Set a client entry in <code>SCORING_API_KEYS</code>, or the legacy <code>SCORING_API_KEY</code>, to enable scoring.{% endif %}</span>
+</section>
+
+<section class="note-panel">
+    <strong>Documentation format:</strong>
+    This page is a static quick reference, not an interactive API console. Import the OpenAPI JSON into an approved OpenAPI viewer or client generator when interactive exploration is required.
 </section>
 
 <section class="dashboard-grid split">
     <article class="panel data-panel">
         <h2>Endpoint</h2>
         <pre class="code-block">POST /api/v1/score/
-X-API-Key: &lt;SCORING_API_KEY&gt;
+X-API-Key: &lt;API_KEY&gt;
 Idempotency-Key: &lt;UUID&gt;
 Content-Type: application/json</pre>
-        <p>API status: <strong>{% if api_enabled %}configured{% else %}disabled until SCORING_API_KEY is set{% endif %}</strong></p>
+        <p>Use either <code>X-API-Key</code> or a Bearer token containing the same configured API key. Never put the key in a URL or application log.</p>
     </article>
     <article class="panel data-panel">
         <h2>Behavior</h2>
         <ul>
             <li>Validates the same contract as the staff form.</li>
             <li>Stores a durable case and keyed audit fingerprint.</li>
-            <li>Replays the same result for a repeated idempotency key.</li>
+            <li>Replays the same result for a repeated idempotency key and identical payload.</li>
+            <li>Rejects the same key with a different payload instead of silently overwriting a case.</li>
             <li>Does not generate explanations or adverse-action reasons.</li>
         </ul>
     </article>
 </section>
 
 <section class="panel data-panel">
-    <h2>Example body</h2>
-    <pre class="code-block">{
+    <h2 id="request-example-title">Example request body</h2>
+    <pre class="code-block" aria-labelledby="request-example-title">{
   "applicant_reference": "APP-001",
   "person_age": 30,
   "person_income": 65000,
@@ -45,5 +56,71 @@ Content-Type: application/json</pre>
   "cb_person_cred_hist_length": 6,
   "cb_person_default_on_file": "N"
 }</pre>
+</section>
+
+<section class="dashboard-grid split">
+    <article class="panel data-panel">
+        <h2 id="curl-example-title">Example request</h2>
+        <pre class="code-block" aria-labelledby="curl-example-title">curl --request POST http://127.0.0.1:8000/api/v1/score/ \
+  --header "X-API-Key: &lt;API_KEY&gt;" \
+  --header "Idempotency-Key: 4f5fb57a-f5af-4ff1-b4aa-56b8bb4fe012" \
+  --header "Content-Type: application/json" \
+  --data @application.json</pre>
+    </article>
+    <article class="panel data-panel">
+        <h2 id="response-example-title">Example 200 response</h2>
+        <pre class="code-block" aria-labelledby="response-example-title">{
+  "case_id": "72be1477-361a-4bf5-8d9f-69191529f08b",
+  "model_version": "2.1.0",
+  "probability": 0.184321,
+  "risk_category": "Low",
+  "screening_result": "No elevated repayment concern identified",
+  "recommended_next_step": "Continue with standard review",
+  "threshold": 0.21,
+  "warnings": []
+}</pre>
+    </article>
+</section>
+
+<section class="panel data-panel">
+    <h2>Response and error contract</h2>
+    <div class="table-wrap">
+        <table class="data-table">
+            <caption class="sr-only">HTTP responses returned by the scoring API</caption>
+            <thead><tr><th scope="col">Status</th><th scope="col">Meaning</th><th scope="col">Caller action</th></tr></thead>
+            <tbody>
+                <tr><th scope="row">200</th><td>Score returned or idempotent replay</td><td>Store the case ID and continue the staff workflow.</td></tr>
+                <tr><th scope="row">400</th><td>Malformed JSON, invalid idempotency key, or field validation failure</td><td>Correct the request; inspect the returned <code>fields</code> object when present.</td></tr>
+                <tr><th scope="row">401</th><td>Missing or invalid API key</td><td>Check secret injection without logging the key.</td></tr>
+                <tr><th scope="row">409</th><td>Idempotency key was already used with different input</td><td>Do not retry under that key; investigate the caller’s request identity.</td></tr>
+                <tr><th scope="row">422</th><td>Valid input is materially outside the supported model domain; no score was produced</td><td>Verify the input and route the application to the approved non-model process.</td></tr>
+                <tr><th scope="row">429</th><td>Per-minute rate limit exceeded</td><td>Wait for the <code>Retry-After</code> interval before retrying.</td></tr>
+                <tr><th scope="row">503</th><td>API disabled or approved model unavailable</td><td>Stop scoring and escalate to the service owner.</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <p class="section-copy">Reuse an idempotency key only when retrying the same logical request. Keep the original payload with the case ID in the calling system’s audit record.</p>
+</section>
+
+<section class="dashboard-grid split">
+    <article class="panel data-panel">
+        <h2 id="validation-error-title">Example validation error</h2>
+        <pre class="code-block" aria-labelledby="validation-error-title">{
+  "error": "Validation failed.",
+  "fields": {
+    "person_income": [
+      {"message": "Ensure this value is greater than or equal to 1.", "code": "min_value"}
+    ]
+  }
+}</pre>
+    </article>
+    <article class="panel data-panel">
+        <h2 id="domain-error-title">Example unsupported-domain response</h2>
+        <pre class="code-block" aria-labelledby="domain-error-title">{
+  "error": "Application is outside the supported model domain; no score was produced.",
+  "reasons": ["Verify the unusually high loan-to-income ratio."]
+}</pre>
+        <p>Example messages are illustrative; callers must handle the documented status and response fields rather than matching sentence text.</p>
+    </article>
 </section>
 {% endblock %}

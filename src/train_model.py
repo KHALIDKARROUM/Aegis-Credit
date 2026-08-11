@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
-import hashlib
 import json
 import os
 import platform
@@ -21,7 +19,6 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import sklearn
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
@@ -45,11 +42,24 @@ from sklearn.model_selection import GridSearchCV, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
+from .feature_contract import (
+    CATEGORICAL_FEATURES,
+    EXCLUDED_LENDER_ASSIGNED_FEATURES,
+    EXCLUDED_POLICY_FEATURES,
+    FEATURE_CONTRACT_VERSION,
+    FEATURES,
+    FORM_NUMERIC_FEATURES,
+    NUMERIC_FEATURES,
+    TARGET,
+    model_feature_frame,
+    with_canonical_derived_features,
+)
 from .model_reporting import (
     save_age_fairness_report,
     save_bootstrap_intervals,
     save_calibration_report,
 )
+from .release_artifacts import file_sha256, sign_manifest, snapshot_report_bundle
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -60,29 +70,29 @@ MODEL_BUNDLE_PATH = MODELS_DIR / "credit_risk_model.pkl"
 MODEL_MANIFEST_PATH = MODELS_DIR / "model_manifest.json"
 
 RANDOM_STATE = 42
-TARGET = "loan_status"
-MODEL_VERSION = "2.1.0"
+MODEL_VERSION = "2.2.0"
 FALSE_NEGATIVE_COST = 5
 FALSE_POSITIVE_COST = 1
 
-NUMERIC_FEATURES = [
-    "person_income",
-    "person_emp_length",
-    "loan_amnt",
-    "loan_percent_income",
-    "cb_person_cred_hist_length",
-]
-
-CATEGORICAL_FEATURES = [
-    "person_home_ownership",
-    "loan_intent",
-    "cb_person_default_on_file",
-]
-
-FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
-EXCLUDED_LENDER_ASSIGNED_FEATURES = ["loan_int_rate", "loan_grade"]
-EXCLUDED_POLICY_FEATURES = ["person_age"]
-FORM_NUMERIC_FEATURES = ["person_age"] + NUMERIC_FEATURES
+RELEASE_REPORT_ARTIFACTS = {
+    "business_report.md",
+    "calibration_analysis.csv",
+    "calibration_curve.png",
+    "classification_report.txt",
+    "confusion_matrix.png",
+    "fairness_age_groups.csv",
+    "final_model_metrics.csv",
+    "metric_confidence_intervals.csv",
+    "model_comparison.csv",
+    "model_comparison.png",
+    "permutation_importance.csv",
+    "permutation_importance.png",
+    "risk_band_validation.csv",
+    "threshold_analysis.csv",
+    "threshold_selection_validation.csv",
+    "threshold_tradeoff.png",
+    "threshold_uncertainty.csv",
+}
 
 
 def _one_hot_encoder() -> OneHotEncoder:
@@ -100,7 +110,9 @@ def load_credit_data(path: Path = DATA_PATH) -> pd.DataFrame:
     data.loc[data["person_emp_length"] > 60, "person_emp_length"] = np.nan
     data.loc[data["person_age"] > 100, "person_age"] = np.nan
 
-    return data
+    # Production requests do not supply the source dataset's derived ratio.
+    # Always reconstruct it from the same raw fields used by serving.
+    return with_canonical_derived_features(data)
 
 
 def build_preprocessor() -> ColumnTransformer:
@@ -245,6 +257,72 @@ def choose_business_threshold(threshold_table: pd.DataFrame) -> float:
     return float(ranked.iloc[0]["threshold"])
 
 
+def save_threshold_uncertainty(
+    y_true: pd.Series,
+    probabilities: np.ndarray,
+    output_path: Path,
+    *,
+    iterations: int,
+) -> pd.DataFrame:
+    """Bootstrap the complete threshold-selection rule on validation data."""
+    labels = np.asarray(y_true)
+    scores = np.asarray(probabilities)
+    rng = np.random.default_rng(RANDOM_STATE)
+    selections: list[dict[str, float]] = []
+    for _ in range(iterations):
+        indices = rng.integers(0, len(labels), size=len(labels))
+        sample_labels = labels[indices]
+        if np.unique(sample_labels).size < 2:
+            continue
+        table = build_threshold_table(pd.Series(sample_labels), scores[indices])
+        threshold = choose_business_threshold(table)
+        row = table.loc[(table["threshold"] - threshold).abs().idxmin()]
+        population = row["true_negatives"] + row["false_positives"] + row["false_negatives"] + row["true_positives"]
+        selections.append(
+            {
+                "threshold": threshold,
+                "business_cost": float(row["business_cost"]),
+                "recall": float(row["recall"]),
+                "review_rate": float((row["false_positives"] + row["true_positives"]) / population),
+            }
+        )
+    samples = pd.DataFrame(selections)
+    if samples.empty:
+        raise RuntimeError("Threshold bootstrap produced no valid resamples.")
+    summary: dict[str, Any] = {
+        "evaluation_split": "threshold_selection",
+        "bootstrap_iterations": len(samples),
+        "false_negative_cost": FALSE_NEGATIVE_COST,
+        "false_positive_cost": FALSE_POSITIVE_COST,
+    }
+    for column in ["threshold", "business_cost", "recall", "review_rate"]:
+        summary[f"{column}_median"] = float(samples[column].median())
+        summary[f"{column}_ci_lower"] = float(samples[column].quantile(0.025))
+        summary[f"{column}_ci_upper"] = float(samples[column].quantile(0.975))
+    output = pd.DataFrame([summary])
+    output.to_csv(output_path, index=False)
+    return output
+
+
+def build_threshold_reports(
+    y_threshold: pd.Series,
+    threshold_probability: np.ndarray,
+    y_test: pd.Series,
+    final_probability: np.ndarray,
+    business_threshold: float,
+) -> tuple[pd.DataFrame, pd.Series]:
+    """Build validation scenarios and one locked final-test operating point."""
+
+    scenarios = build_threshold_table(y_threshold, threshold_probability).assign(
+        evaluation_split="threshold_selection"
+    )
+    final_test_table = build_threshold_table(y_test, final_probability)
+    final_row = final_test_table.iloc[
+        (final_test_table["threshold"] - business_threshold).abs().argsort()[:1]
+    ].iloc[0]
+    return scenarios, final_row
+
+
 def build_feature_reference(data: pd.DataFrame) -> dict[str, Any]:
     return {
         "numeric_medians": {
@@ -272,6 +350,8 @@ def build_drift_reference(data: pd.DataFrame) -> dict[str, Any]:
     numeric: dict[str, Any] = {}
     for column in NUMERIC_FEATURES:
         values = data[column].dropna().astype(float)
+        if values.empty:
+            raise ValueError(f"Cannot build a drift baseline for all-missing feature: {column}")
         edges = np.unique(values.quantile(np.linspace(0, 1, 11)).to_numpy())
         if len(edges) < 3:
             edges = np.array([-np.inf, values.median(), np.inf])
@@ -283,6 +363,8 @@ def build_drift_reference(data: pd.DataFrame) -> dict[str, Any]:
         numeric[column] = {
             "edges": edges.tolist(),
             "proportions": proportions,
+            "missing_count": int(data[column].isna().sum()),
+            "missing_rate": float(data[column].isna().mean()),
         }
 
     categorical = {
@@ -293,15 +375,28 @@ def build_drift_reference(data: pd.DataFrame) -> dict[str, Any]:
         "numeric": numeric,
         "categorical": categorical,
         "observed_default_rate": float(data[TARGET].mean()),
+        "reference_rows": int(len(data)),
     }
 
 
-def file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def build_score_reference(probabilities: np.ndarray) -> dict[str, Any]:
+    """Build a training-only baseline for calibrated prediction drift."""
+    values = pd.Series(np.asarray(probabilities, dtype=float)).dropna()
+    if values.empty or not np.isfinite(values).all():
+        raise ValueError("Cannot build a score baseline from missing or non-finite values.")
+    edges = np.unique(values.quantile(np.linspace(0, 1, 11)).to_numpy())
+    if len(edges) < 3:
+        edges = np.array([-np.inf, values.median(), np.inf])
+    else:
+        edges[0] = -np.inf
+        edges[-1] = np.inf
+    counts, _ = np.histogram(values, bins=edges)
+    return {
+        "edges": edges.tolist(),
+        "proportions": (counts / counts.sum()).tolist(),
+        "mean": float(values.mean()),
+        "reference_rows": int(len(values)),
+    }
 
 
 def git_commit() -> str:
@@ -329,8 +424,8 @@ def git_is_dirty() -> bool | None:
         return None
 
 
-def git_release_tag() -> str:
-    """Return the single tag pointing at HEAD, refusing ambiguous releases."""
+def git_release_tag(expected_version: str = MODEL_VERSION) -> str:
+    """Return the exact model-version tag pointing at HEAD."""
     try:
         tags = subprocess.check_output(
             ["git", "tag", "--points-at", "HEAD"],
@@ -340,28 +435,12 @@ def git_release_tag() -> str:
         ).splitlines()
     except (OSError, subprocess.SubprocessError) as exc:
         raise RuntimeError("A release must be built from a tagged Git commit.") from exc
-    if len(tags) != 1:
-        raise RuntimeError("A release must be built from a commit with exactly one Git tag.")
-    return tags[0]
-
-
-def canonical_manifest(manifest: dict[str, Any]) -> bytes:
-    return json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
-
-
-def sign_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
-    encoded_key = os.getenv("MODEL_SIGNING_PRIVATE_KEY", "")
-    if not encoded_key:
-        raise RuntimeError("MODEL_SIGNING_PRIVATE_KEY must be supplied by the release secret manager.")
-    try:
-        private_key = Ed25519PrivateKey.from_private_bytes(base64.b64decode(encoded_key, validate=True))
-    except (ValueError, TypeError) as exc:
-        raise RuntimeError("MODEL_SIGNING_PRIVATE_KEY must be a base64-encoded Ed25519 private key.") from exc
-    signed = dict(manifest)
-    signed["signature_algorithm"] = "ed25519"
-    signed["signing_key_id"] = os.getenv("MODEL_SIGNING_KEY_ID", "default")
-    signed["signature"] = base64.b64encode(private_key.sign(canonical_manifest(signed))).decode("ascii")
-    return signed
+    expected_tag = f"model-v{expected_version}"
+    if tags != [expected_tag]:
+        raise RuntimeError(
+            f"Release tag must be exactly {expected_tag!r}; found {tags or 'no tags'}."
+        )
+    return expected_tag
 
 
 def save_model_comparison_chart(results: pd.DataFrame) -> None:
@@ -416,26 +495,33 @@ def save_threshold_chart(threshold_table: pd.DataFrame) -> None:
     lines, labels = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines + lines2, labels + labels2, loc="center right")
-    plt.title("Threshold Tradeoff: Risk Capture vs Customer Rejection")
+    plt.title("Threshold-Selection Tradeoff: Risk Capture vs Review Volume")
     plt.tight_layout()
     plt.savefig(REPORTS_DIR / "threshold_tradeoff.png", dpi=160)
     plt.close(fig)
 
 
 def save_permutation_importance(
-    model: Pipeline,
+    model: Any,
     X_test: pd.DataFrame,
     y_test: pd.Series,
+    threshold: float,
 ) -> pd.DataFrame:
+    """Measure the behavior of the calibrated predictor at its deployed policy cutoff."""
     sample_size = min(3000, len(X_test))
     X_sample = X_test.sample(sample_size, random_state=RANDOM_STATE)
     y_sample = y_test.loc[X_sample.index]
+
+    def deployed_policy_f1(estimator: Any, features: pd.DataFrame, labels: pd.Series) -> float:
+        probabilities = estimator.predict_proba(features)[:, 1]
+        predictions = (probabilities >= threshold).astype(int)
+        return float(f1_score(labels, predictions, zero_division=0))
 
     result = permutation_importance(
         model,
         X_sample,
         y_sample,
-        scoring="f1",
+        scoring=deployed_policy_f1,
         n_repeats=7,
         random_state=RANDOM_STATE,
         n_jobs=-1,
@@ -456,13 +542,71 @@ def save_permutation_importance(
     top = importance.head(10).sort_values("importance_mean")
     plt.figure(figsize=(10, 6))
     plt.barh(top["feature"], top["importance_mean"], xerr=top["importance_std"])
-    plt.title("Top Drivers of Credit Default Predictions")
-    plt.xlabel("Permutation Importance (F1 decrease)")
+    plt.title("Top Drivers of the Deployed Review Policy")
+    plt.xlabel(f"Permutation importance (F1 decrease at {threshold:.2f})")
     plt.tight_layout()
     plt.savefig(REPORTS_DIR / "permutation_importance.png", dpi=160)
     plt.close()
 
     return importance
+
+
+def save_risk_band_validation(
+    y_true: pd.Series,
+    probabilities: np.ndarray,
+    output_path: Path,
+    *,
+    low_cutoff: float,
+    medium_cutoff: float,
+) -> pd.DataFrame:
+    """Validate candidate display bands on threshold-selection data only."""
+    labels = np.asarray(y_true, dtype=int)
+    scores = np.asarray(probabilities, dtype=float)
+    band_names = np.select(
+        [scores <= low_cutoff, scores <= medium_cutoff],
+        ["low", "medium"],
+        default="high",
+    )
+    rows: list[dict[str, Any]] = []
+    z = 1.96
+    for name in ("low", "medium", "high"):
+        mask = band_names == name
+        count = int(mask.sum())
+        if count == 0:
+            raise RuntimeError(f"Candidate risk band {name!r} has no validation observations.")
+        defaults = int(labels[mask].sum())
+        rate = defaults / count
+        denominator = 1 + (z**2 / count)
+        centre = (rate + (z**2 / (2 * count))) / denominator
+        half_width = (
+            z
+            * np.sqrt((rate * (1 - rate) / count) + (z**2 / (4 * count**2)))
+            / denominator
+        )
+        rows.append(
+            {
+                "evaluation_split": "threshold_selection",
+                "risk_band_policy_version": "validation-v1",
+                "risk_band": name,
+                "count": count,
+                "population_share": count / len(labels),
+                "defaults": defaults,
+                "observed_default_rate": rate,
+                "default_rate_ci_lower": max(0.0, centre - half_width),
+                "default_rate_ci_upper": min(1.0, centre + half_width),
+                "low_cutoff": low_cutoff,
+                "medium_cutoff": medium_cutoff,
+            }
+        )
+    result = pd.DataFrame(rows)
+    rates = result["observed_default_rate"].to_numpy()
+    if np.any(np.diff(rates) < 0):
+        raise RuntimeError(
+            "Candidate risk bands are not monotonic on threshold-selection data; "
+            "release requires a revised, approved band policy."
+        )
+    result.to_csv(output_path, index=False)
+    return result
 
 
 def write_business_report(
@@ -511,10 +655,10 @@ Selected model parameters:
 
 ## Business Threshold Results
 
-The selected business threshold is **{threshold:.2f}**. It assumes a false negative is 5x more costly than a false positive:
+The selected screening threshold is **{threshold:.2f}**. Its illustrative count-weighted objective assumes a false negative is 5x more costly than a false positive; it is not an approved expected-loss model:
 
 - False negative: a risky borrower is approved.
-- False positive: a safer borrower is rejected or sent to manual review.
+- False positive: a safer borrower is unnecessarily routed to manual review.
 
 | Metric | Score |
 |---|---:|
@@ -539,18 +683,22 @@ The model is a decision-support tool, not an autonomous approval system. The bus
 def train_and_save(quick: bool = False, require_clean: bool = False, release: bool = False) -> dict[str, Any]:
     if not release:
         raise RuntimeError("Refusing to overwrite a release artifact outside `--release` mode.")
+    if quick:
+        raise RuntimeError(
+            "Quick training is for local experimentation and cannot produce a release artifact."
+        )
     if git_is_dirty() is not False:
         raise RuntimeError(
             "Refusing to produce a release artifact from a dirty Git worktree."
         )
     if os.getenv("DATA_PROVENANCE_VERIFIED", "").lower() not in {"1", "true", "yes"}:
         raise RuntimeError("Refusing to train a release from data without verified provenance approval.")
-    release_tag = git_release_tag()
+    release_tag = git_release_tag(MODEL_VERSION)
     MODELS_DIR.mkdir(exist_ok=True)
     REPORTS_DIR.mkdir(exist_ok=True)
 
     data = load_credit_data()
-    X = data[FEATURES]
+    X = model_feature_frame(data)
     y = data[TARGET]
 
     X_development, X_test, y_development, y_test = train_test_split(
@@ -646,24 +794,35 @@ def train_and_save(quick: bool = False, require_clean: bool = False, release: bo
         if name in classifier_parameters
     }
     threshold_probability = calibrated_model.predict_proba(X_threshold)[:, 1]
-    threshold_selection_table = build_threshold_table(y_threshold, threshold_probability)
-
     final_probability = calibrated_model.predict_proba(X_test)[:, 1]
+    score_reference = build_score_reference(
+        calibrated_model.predict_proba(X_train)[:, 1]
+    )
     final_metrics = evaluate_predictions(y_test, final_probability, threshold=0.5)
-    threshold_table = build_threshold_table(y_test, final_probability)
+    # The final test is measured only at preselected thresholds. Interactive
+    # threshold scenarios must remain on the dedicated threshold partition.
+    threshold_selection_table, threshold_row = build_threshold_reports(
+        y_threshold,
+        threshold_probability,
+        y_test,
+        final_probability,
+        business_threshold,
+    )
     business_metrics = evaluate_predictions(
         y_test,
         final_probability,
         threshold=business_threshold,
     )
-    threshold_row = threshold_table.iloc[
-        (threshold_table["threshold"] - business_threshold).abs().argsort()[:1]
-    ].iloc[0]
-
-    threshold_table.to_csv(REPORTS_DIR / "threshold_analysis.csv", index=False)
+    threshold_selection_table.to_csv(REPORTS_DIR / "threshold_analysis.csv", index=False)
     threshold_selection_table.to_csv(
         REPORTS_DIR / "threshold_selection_validation.csv",
         index=False,
+    )
+    save_threshold_uncertainty(
+        y_threshold,
+        threshold_probability,
+        REPORTS_DIR / "threshold_uncertainty.csv",
+        iterations=200 if quick else 1000,
     )
     pd.DataFrame(
         [
@@ -694,8 +853,13 @@ def train_and_save(quick: bool = False, require_clean: bool = False, release: bo
     )
 
     save_confusion_matrix_chart(y_test, final_probability, business_threshold)
-    save_threshold_chart(threshold_table)
-    permutation = save_permutation_importance(explanation_pipeline, X_test, y_test)
+    save_threshold_chart(threshold_selection_table)
+    permutation = save_permutation_importance(
+        calibrated_model,
+        X_test,
+        y_test,
+        business_threshold,
+    )
     calibration = save_calibration_report(
         y_test,
         final_probability,
@@ -714,6 +878,21 @@ def train_and_save(quick: bool = False, require_clean: bool = False, release: bo
         business_threshold,
         REPORTS_DIR,
         iterations=200 if quick else 1000,
+    )
+    risk_band_policy = {
+        "policy_version": "validation-v1",
+        "low": round(max(0.05, business_threshold * 0.5), 2),
+        "medium": round(
+            min(0.90, max(business_threshold + 0.10, business_threshold * 2)),
+            2,
+        ),
+    }
+    save_risk_band_validation(
+        y_threshold,
+        threshold_probability,
+        REPORTS_DIR / "risk_band_validation.csv",
+        low_cutoff=risk_band_policy["low"],
+        medium_cutoff=risk_band_policy["medium"],
     )
     split_sizes = {
         "train": len(X_train),
@@ -747,13 +926,17 @@ def train_and_save(quick: bool = False, require_clean: bool = False, release: bo
         "target": TARGET,
         "feature_reference": build_feature_reference(data.loc[X_train.index]),
         "drift_reference": build_drift_reference(data.loc[X_train.index]),
+        "score_reference": score_reference,
         "permutation_importance": permutation,
         "calibration_analysis": calibration,
         "fairness_age_groups": fairness,
         "metric_confidence_intervals": confidence_intervals,
         "excluded_lender_assigned_features": EXCLUDED_LENDER_ASSIGNED_FEATURES,
         "excluded_policy_features": EXCLUDED_POLICY_FEATURES,
+        "feature_contract_version": FEATURE_CONTRACT_VERSION,
         "model_version": MODEL_VERSION,
+        "training_mode": "full_release",
+        "random_state": RANDOM_STATE,
         "trained_at_utc": datetime.now(timezone.utc).isoformat(),
         "data_sha256": file_sha256(DATA_PATH),
         "git_commit": git_commit(),
@@ -770,14 +953,9 @@ def train_and_save(quick: bool = False, require_clean: bool = False, release: bo
             "numpy": np.__version__,
             "pandas": pd.__version__,
             "scikit_learn": sklearn.__version__,
+            "joblib": joblib.__version__,
         },
-        "risk_bands": {
-            "low": round(max(0.05, business_threshold * 0.5), 2),
-            "medium": round(
-                min(0.90, max(business_threshold + 0.10, business_threshold * 2)),
-                2,
-            ),
-        },
+        "risk_bands": risk_band_policy,
     }
 
     # Release bundles are content-addressed and never overwritten. The manifest
@@ -793,6 +971,12 @@ def train_and_save(quick: bool = False, require_clean: bool = False, release: bo
         staging_path.unlink()
     else:
         staging_path.replace(release_path)
+    report_bundle = snapshot_report_bundle(
+        reports_dir=REPORTS_DIR,
+        release_dir=release_path.parent,
+        artifact_names=RELEASE_REPORT_ARTIFACTS,
+        models_dir=MODELS_DIR,
+    )
     manifest = sign_manifest(
         {
                 "model_version": MODEL_VERSION,
@@ -810,12 +994,19 @@ def train_and_save(quick: bool = False, require_clean: bool = False, release: bo
                 "risk_bands": bundle["risk_bands"],
                 "best_params": bundle["best_params"],
                 "runtime_versions": bundle["runtime_versions"],
+                "feature_contract_version": FEATURE_CONTRACT_VERSION,
+                "training_mode": bundle["training_mode"],
+                "random_state": bundle["random_state"],
                 "features": FEATURES,
                 "excluded_lender_assigned_features": EXCLUDED_LENDER_ASSIGNED_FEATURES,
                 "excluded_policy_features": EXCLUDED_POLICY_FEATURES,
+                "threshold": business_threshold,
+                "report_bundle": report_bundle,
         }
     )
-    MODEL_MANIFEST_PATH.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    manifest_staging = MODEL_MANIFEST_PATH.with_suffix(".json.tmp")
+    manifest_staging.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    manifest_staging.replace(MODEL_MANIFEST_PATH)
 
     return {
         "model_path": str(release_path),
@@ -832,7 +1023,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--quick",
         action="store_true",
-        help="Use a smaller hyperparameter grid for faster local iteration.",
+        help="Request quick mode (explicitly rejected for signed release builds).",
     )
     parser.add_argument(
         "--release",

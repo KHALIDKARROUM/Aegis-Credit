@@ -9,41 +9,166 @@
         <h1>Monitoring</h1>
         <p>Operational volume, human overrides, and the latest offline drift report.</p>
     </div>
+    {% if model_versions %}
+    <form method="get" class="inline-filter" aria-label="Filter monitoring by model version">
+        <label for="model-version-filter">Model version</label>
+        <select id="model-version-filter" name="model_version">
+            <option value="">All versions</option>
+            {% for version in model_versions %}<option value="{{ version }}" {% if selected_model == version %}selected{% endif %}>{{ version }}</option>{% endfor %}
+        </select>
+        <button class="secondary-button" type="submit">Apply</button>
+    </form>
+    {% endif %}
 </section>
+
+{% if latest_monitoring_run.status == "failed" or monitoring_status == "error" %}
+<section class="form-alert error-alert" role="alert">
+    <strong>Monitoring data could not be loaded.</strong>
+    <span>{{ monitoring_message|default:"Preserve the last approved report and contact the monitoring owner." }}</span>
+</section>
+{% elif monitoring_status == "missing" or not drift_table.rows %}
+<section class="status-banner neutral" role="status">
+    <strong>No drift report is available.</strong>
+    <span>{% if latest_monitoring_run %}The recorded run contains no feature-level drift rows; ask the monitoring owner to verify its inputs.{% else %}Run the monitoring command against a representative incoming batch.{% endif %}</span>
+</section>
+{% elif latest_monitoring_run.status == "alert" %}
+<section class="status-banner warning" role="status">
+    <strong>The latest monitoring run contains alerts.</strong>
+    <span>{{ monitoring_message|default:"Review, acknowledge, or escalate the findings before closing the monitoring cycle." }}</span>
+</section>
+{% elif monitoring_status == "stale" %}
+<section class="status-banner warning" role="status">
+    <strong>Drift report is stale.</strong>
+    <span>{{ monitoring_message|default:"Generate and review a representative incoming-data report before relying on these indicators." }}</span>
+</section>
+{% elif monitoring_status == "fresh" %}
+<section class="status-banner success" role="status">
+    <strong>Monitoring report is within its configured freshness window.</strong>
+    {% if monitoring_message %}<span>{{ monitoring_message }}</span>{% endif %}
+</section>
+{% else %}
+<section class="status-banner neutral" role="status">
+    <strong>Report freshness is not recorded.</strong>
+    <span>Verify the report’s generation time, model version, and source cohort before use.</span>
+</section>
+{% endif %}
+
+{% if drift_generated_at or drift_model_version or drift_sample_size != None %}
+<dl class="provenance-strip" aria-label="Monitoring report provenance">
+    {% if drift_generated_at %}<div><dt>Generated</dt><dd>{{ drift_generated_at }}</dd></div>{% endif %}
+    {% if drift_model_version %}<div><dt>Model version</dt><dd>{{ drift_model_version }}</dd></div>{% endif %}
+    {% if drift_sample_size != None %}<div><dt>Incoming rows</dt><dd>{{ drift_sample_size }}</dd></div>{% endif %}
+    {% if drift_alert_count != None %}<div><dt>Alerts</dt><dd>{{ drift_alert_count }}</dd></div>{% endif %}
+    {% if latest_monitoring_run %}<div><dt>Run status</dt><dd>{{ latest_monitoring_run.get_status_display }}</dd></div>{% endif %}
+    {% if latest_monitoring_run.owner %}<div><dt>Owner</dt><dd>{{ latest_monitoring_run.owner }}</dd></div>{% endif %}
+</dl>
+{% endif %}
+
+{% if latest_monitoring_run.alerts %}
+<section class="form-alert warning-alert" role="alert">
+    <strong>Monitoring alerts require review</strong>
+    <ul>{% for alert in latest_monitoring_run.alerts %}<li>{{ alert }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+{% if latest_monitoring_run %}
+<section class="dashboard-grid split-wide monitoring-review-grid">
+    {% if product_role == "reviewer" or product_role == "legal" or product_role == "admin" or product_role == "local" %}
+    <article class="panel data-panel">
+        <div class="card-heading">
+            <div>
+                <h2>Record monitoring follow-up</h2>
+                <p>Attach an immutable note to this run. Resolving an alert requires the underlying corrective evidence.</p>
+            </div>
+        </div>
+        <form method="post" action="{% url 'monitoring-acknowledge' latest_monitoring_run.id %}" class="stacked-form">
+            {% csrf_token %}
+            <div class="field-group">
+                <label for="monitoring-action">Action</label>
+                <select id="monitoring-action" name="action" required>
+                    <option value="">Choose an action</option>
+                    <option value="acknowledged">Acknowledge</option>
+                    <option value="escalated">Escalate</option>
+                    <option value="resolved">Resolve</option>
+                </select>
+            </div>
+            <div class="field-group">
+                <label for="monitoring-note">Follow-up note</label>
+                <textarea id="monitoring-note" name="note" rows="3" minlength="10" required aria-describedby="monitoring-note-hint"></textarea>
+                <span class="field-hint" id="monitoring-note-hint">Identify the owner, evidence reviewed, and next step. Do not include applicant data.</span>
+            </div>
+            <button class="primary-button" type="submit">Record follow-up</button>
+        </form>
+    </article>
+    {% endif %}
+    <article class="panel data-panel">
+        <div class="card-heading"><div><h2>Monitoring history</h2><p>Recorded actions for the selected run.</p></div></div>
+        <div class="table-wrap">
+            <table class="data-table">
+                <caption class="sr-only">Acknowledgements, escalations, and resolutions for the selected monitoring run</caption>
+                <thead><tr><th scope="col">Time</th><th scope="col">Action</th><th scope="col">Actor</th><th scope="col">Note</th></tr></thead>
+                <tbody>
+                    {% for acknowledgement in monitoring_acknowledgements %}
+                    <tr>
+                        <th scope="row">{{ acknowledgement.created_at|date:"Y-m-d H:i" }}</th>
+                        <td><span class="status-pill {{ acknowledgement.action }}">{{ acknowledgement.get_action_display }}</span></td>
+                        <td>{% if acknowledgement.actor %}{{ acknowledgement.actor.get_username }}{% else %}System{% endif %}</td>
+                        <td>{{ acknowledgement.note }}</td>
+                    </tr>
+                    {% empty %}<tr><td colspan="4">No follow-up has been recorded for this run.</td></tr>{% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </article>
+</section>
+{% endif %}
 
 <section class="metric-grid four-col">
     <article class="metric-tile"><div class="metric-label">Scores</div><div class="metric-value">{{ total_scores }}</div></article>
     <article class="metric-tile"><div class="metric-label">Open cases</div><div class="metric-value">{{ open_cases }}</div></article>
     <article class="metric-tile"><div class="metric-label">Reviewed cases</div><div class="metric-value">{{ reviewed_cases }}</div></article>
     <article class="metric-tile"><div class="metric-label">Override rate</div><div class="metric-value">{{ override_rate }}</div></article>
+    <article class="metric-tile"><div class="metric-label">Mature outcomes</div><div class="metric-value">{{ mature_outcomes|default:0 }}</div></article>
 </section>
 
 <section class="dashboard-grid three-col">
     <article class="panel data-panel">
         <h2>By risk level</h2>
         <dl class="detail-list">
-            {% for row in by_risk %}<div><dt>{{ row.risk_category }}</dt><dd>{{ row.count }} · avg {{ row.average_probability|floatformat:3 }}</dd></div>{% empty %}<p>No scores yet.</p>{% endfor %}
+            {% for row in by_risk %}<div><dt>{{ row.risk_category }}</dt><dd>{{ row.count }} · average probability {{ row.average_probability|floatformat:3 }}</dd></div>{% empty %}<div><dt>No scores yet</dt><dd>—</dd></div>{% endfor %}
         </dl>
     </article>
     <article class="panel data-panel">
         <h2>By source</h2>
         <dl class="detail-list">
-            {% for row in by_source %}<div><dt>{{ row.source }}</dt><dd>{{ row.count }}</dd></div>{% empty %}<p>No scores yet.</p>{% endfor %}
+            {% for row in by_source %}<div><dt>{{ row.source|title }}</dt><dd>{{ row.count }}</dd></div>{% empty %}<div><dt>No scores yet</dt><dd>—</dd></div>{% endfor %}
         </dl>
     </article>
     <article class="panel data-panel">
         <h2>Recent volume</h2>
         <dl class="detail-list">
-            {% for row in daily %}<div><dt>{{ row.day }}</dt><dd>{{ row.scores }} · avg {{ row.average_probability|floatformat:3 }}</dd></div>{% empty %}<p>No scores yet.</p>{% endfor %}
+            {% for row in daily %}<div><dt>{{ row.day|date:"Y-m-d" }}</dt><dd>{{ row.scores }} · average probability {{ row.average_probability|floatformat:3 }}</dd></div>{% empty %}<div><dt>No scores yet</dt><dd>—</dd></div>{% endfor %}
         </dl>
     </article>
 </section>
 
 <section class="panel data-panel">
-    <div class="card-heading"><div><h2>Latest drift report</h2><p>Run the monitoring command against a representative incoming batch to refresh this table.</p></div></div>
+    <div class="card-heading"><div><h2>Mature-outcome performance</h2><p>Observed outcome evidence for the selected model version; empty cohorts are not evidence of good performance.</p></div></div>
     <div class="table-wrap">
         <table class="data-table">
-            <thead><tr>{% for column in drift_table.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead>
+            <caption class="sr-only">Performance metrics calculated from recorded mature outcomes</caption>
+            <thead><tr>{% for column in performance_table.columns %}<th scope="col">{{ column }}</th>{% endfor %}</tr></thead>
+            <tbody>{% for row in performance_table.rows %}<tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>{% empty %}<tr><td>No mature-outcome performance is available for this selection.</td></tr>{% endfor %}</tbody>
+        </table>
+    </div>
+</section>
+
+<section class="panel data-panel">
+    <div class="card-heading"><div><h2>Available drift report</h2><p>Compare freshness and provenance before interpreting feature-distribution changes.</p></div></div>
+    <div class="table-wrap">
+        <table class="data-table">
+            <caption class="sr-only">Feature drift scores and statuses from the available monitoring report</caption>
+            <thead><tr>{% for column in drift_table.columns %}<th scope="col">{{ column }}</th>{% endfor %}</tr></thead>
             <tbody>{% for row in drift_table.rows %}<tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>{% empty %}<tr><td>No drift report is available.</td></tr>{% endfor %}</tbody>
         </table>
     </div>

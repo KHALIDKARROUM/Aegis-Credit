@@ -19,7 +19,7 @@ RUN BUILD_FERNET_KEY="$(python -c 'from cryptography.fernet import Fernet; print
     DEBUG=True SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')" \
     AUDIT_HMAC_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')" \
     FIELD_ENCRYPTION_KEY="$BUILD_FERNET_KEY" BACKUP_ENCRYPTION_KEY="$BUILD_FERNET_KEY" \
-    MODEL_SIGNING_PUBLIC_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" \
+    MODEL_SIGNING_PUBLIC_KEY="$(python -c 'import base64, os; print(base64.b64encode(os.urandom(32)).decode())')" \
     python manage.py collectstatic --no-input && \
     chown -R bankrisk:bankrisk /app
 
